@@ -1,0 +1,238 @@
+# ThreatFlux Docker Workflow
+# Multi-platform Docker builds with security scanning
+# Version: 1.1.0
+
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+  schedule:
+    - cron: "0 4 * * 1" # Weekly on Monday at 4 AM UTC
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  # ==========================================================================
+  # Build Docker Image
+  # ==========================================================================
+  build:
+    name: Build Docker Image
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    outputs:
+      image: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Export for scanning (PRs)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_NAME }}:scan
+          outputs: type=docker,dest=/tmp/image.tar
+          cache-from: type=gha
+
+      - name: Upload image artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: docker-image
+          path: /tmp/image.tar
+          retention-days: 1
+
+  # ==========================================================================
+  # Security Scanning
+  # ==========================================================================
+  scan:
+    name: Security Scan
+    needs: build
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download image (PRs)
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load image (PRs)
+        if: github.event_name == 'pull_request'
+        run: docker load -i /tmp/image.tar
+
+      - name: Log in to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image
+        if: github.event_name != 'pull_request'
+        run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Run Trivy scanner
+        uses: aquasecurity/trivy-action@22438a435773de8c97dc0958cc0b823c45b064ac # master
+        with:
+          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', env.IMAGE_NAME) || format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, github.sha) }}
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          vuln-type: "os,library"
+        continue-on-error: true
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@45c373516f557556c15d420e3f5e0aa3d64366bc # v3
+        with:
+          sarif_file: "trivy-results.sarif"
+        if: always() && hashFiles('trivy-results.sarif') != ''
+
+  # ==========================================================================
+  # Sign Container (main branch only)
+  # ==========================================================================
+  sign:
+    name: Sign Container
+    needs: [build, scan]
+    runs-on: self-hosted
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@4d14d7f17e7112af04ea6108fbb4bfc714c00390 # main
+
+      - name: Log in to registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign container image
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
+        env:
+          COSIGN_EXPERIMENTAL: 1
+
+  # ==========================================================================
+  # Generate SBOM
+  # ==========================================================================
+  sbom:
+    name: Generate SBOM
+    needs: build
+    runs-on: self-hosted
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Log in to registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@0b82b0b1a22399a1c542d4d656f70cd903571b5c # main
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          artifact-name: sbom.spdx.json
+          format: spdx-json
+        continue-on-error: true
+
+  # ==========================================================================
+  # Docker Success Gate
+  # ==========================================================================
+  docker-success:
+    name: Docker Success
+    runs-on: self-hosted
+    needs: [build, scan]
+    if: always()
+    steps:
+      - name: Check Docker jobs
+        run: |
+          if [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "Docker build failed"
+            exit 1
+          fi
+          echo "Docker workflow completed successfully"

@@ -1,0 +1,27 @@
+[package]
+name = "rust-cicd-template"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "ThreatFlux Rust CI/CD Template - Best practices for Rust projects"
+license = "MIT"
+repository = "https://github.com/threatflux/rust-cicd-template"
+keywords = ["ci", "cd", "template", "github-actions"]
+categories = ["development-tools"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[features]
+default = []
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[[bin]]
+name = "rust-cicd-template"
+path = "src/main.rs"

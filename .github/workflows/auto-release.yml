@@ -1,0 +1,201 @@
+# ThreatFlux Auto Release Workflow
+# Automatically creates releases based on conventional commits
+# Version: 1.1.0
+
+name: Auto Release
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security"]
+    types:
+      - completed
+    branches:
+      - main
+  schedule:
+    # Check weekly on Monday at 9 AM UTC
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  # ==========================================================================
+  # Check if Release Needed
+  # ==========================================================================
+  check:
+    name: Check for Release
+    runs-on: self-hosted
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      next_version: ${{ steps.version.outputs.next_version }}
+      current_version: ${{ steps.version.outputs.current_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check CI status
+        id: ci_status
+        run: |
+          CI_STATUS=$(gh run list --workflow=ci.yml --branch=main --limit=1 --json conclusion --jq '.[0].conclusion')
+          SECURITY_STATUS=$(gh run list --workflow=security.yml --branch=main --limit=1 --json conclusion --jq '.[0].conclusion')
+
+          if [[ "$CI_STATUS" == "success" ]] && [[ "$SECURITY_STATUS" == "success" ]]; then
+            echo "all_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "all_passed=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for changes
+        id: check
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            LAST_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          CHANGES=$(git log $LAST_TAG..HEAD --oneline --no-merges | wc -l)
+          FEAT_COUNT=$(git log $LAST_TAG..HEAD --grep="^feat" --oneline | wc -l)
+          FIX_COUNT=$(git log $LAST_TAG..HEAD --grep="^fix" --oneline | wc -l)
+          BREAKING_COUNT=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ steps.ci_status.outputs.all_passed }}" != "true" ]]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          elif [[ $CHANGES -eq 0 ]]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          elif [[ $BREAKING_COUNT -gt 0 ]] || [[ $FEAT_COUNT -gt 0 ]] || [[ $FIX_COUNT -gt 0 ]]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine version
+        id: version
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          # Get current version from Cargo.toml
+          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            BUMP_TYPE="${{ github.event.inputs.version_bump }}"
+          else
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -z "$LAST_TAG" ]; then
+              LAST_TAG=$(git rev-list --max-parents=0 HEAD)
+            fi
+
+            BREAKING=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
+            FEAT=$(git log $LAST_TAG..HEAD --grep="^feat" --oneline | wc -l)
+
+            if [[ $BREAKING -gt 0 ]]; then
+              BUMP_TYPE="major"
+            elif [[ $FEAT -gt 0 ]]; then
+              BUMP_TYPE="minor"
+            else
+              BUMP_TYPE="patch"
+            fi
+          fi
+
+          case $BUMP_TYPE in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          echo "next_version=$MAJOR.$MINOR.$PATCH" >> $GITHUB_OUTPUT
+
+  # ==========================================================================
+  # Create Release
+  # ==========================================================================
+  release:
+    name: Create Release
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update version
+        run: |
+          VERSION="${{ needs.check.outputs.next_version }}"
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          cargo check 2>/dev/null || true  # Update Cargo.lock
+
+      - name: Generate changelog
+        run: |
+          VERSION="${{ needs.check.outputs.next_version }}"
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          echo "## Release v$VERSION" > release_notes.md
+          echo "" >> release_notes.md
+
+          if [ -n "$LAST_TAG" ]; then
+            FEATURES=$(git log $LAST_TAG..HEAD --grep="^feat" --pretty=format:"- %s (%h)" --no-merges)
+            if [ -n "$FEATURES" ]; then
+              echo "### Features" >> release_notes.md
+              echo "$FEATURES" >> release_notes.md
+              echo "" >> release_notes.md
+            fi
+
+            FIXES=$(git log $LAST_TAG..HEAD --grep="^fix" --pretty=format:"- %s (%h)" --no-merges)
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes" >> release_notes.md
+              echo "$FIXES" >> release_notes.md
+              echo "" >> release_notes.md
+            fi
+          fi
+
+      - name: Commit and tag
+        run: |
+          VERSION="${{ needs.check.outputs.next_version }}"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release v$VERSION"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin main
+          git push origin "v$VERSION"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        with:
+          tag_name: v${{ needs.check.outputs.next_version }}
+          name: Release v${{ needs.check.outputs.next_version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

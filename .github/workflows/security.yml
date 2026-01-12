@@ -1,0 +1,231 @@
+# ThreatFlux Security Workflow
+# Comprehensive security scanning pipeline
+# Version: 1.1.0
+
+name: Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "0 3 * * 1" # Weekly on Monday at 3 AM UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ==========================================================================
+  # Security Audit
+  # ==========================================================================
+  audit:
+    name: Security Audit
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@3522286d40783523f9c7880e33f785905b4c20d0 # main
+        with:
+          tool: cargo-audit
+
+      - name: Run security audit
+        run: cargo audit
+
+      - name: Generate audit report
+        run: cargo audit --json > audit-report.json
+        continue-on-error: true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: audit-report
+          path: audit-report.json
+          retention-days: 30
+
+  # ==========================================================================
+  # License and Dependency Check
+  # ==========================================================================
+  deny:
+    name: Dependency Check
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@3522286d40783523f9c7880e33f785905b4c20d0 # main
+        with:
+          tool: cargo-deny
+
+      - name: Create deny.toml if missing
+        run: |
+          if [ ! -f deny.toml ]; then
+            cat > deny.toml << 'EOF'
+          [licenses]
+          confidence-threshold = 0.8
+          allow = [
+            "MIT",
+            "Apache-2.0",
+            "Apache-2.0 WITH LLVM-exception",
+            "BSD-2-Clause",
+            "BSD-3-Clause",
+            "ISC",
+            "Unicode-DFS-2016",
+            "CC0-1.0",
+            "Zlib",
+            "Unicode-3.0",
+            "MPL-2.0",
+          ]
+          deny = [
+            "GPL-2.0",
+            "GPL-3.0",
+            "AGPL-3.0",
+          ]
+
+          [sources]
+          unknown-registry = "warn"
+          unknown-git = "warn"
+
+          [advisories]
+          db-path = "~/.cargo/advisory-db"
+          db-urls = ["https://github.com/rustsec/advisory-db"]
+          yanked = "warn"
+          EOF
+          fi
+
+      - name: Check licenses
+        run: cargo deny check licenses
+
+      - name: Check advisories
+        run: cargo deny check advisories
+
+      - name: Check bans
+        run: cargo deny check bans
+        continue-on-error: true
+
+  # ==========================================================================
+  # Supply Chain Security
+  # ==========================================================================
+  supply-chain:
+    name: Supply Chain
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx
+
+      - name: Generate SBOM
+        run: cargo cyclonedx --format json > sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: sbom.json
+          retention-days: 30
+
+  # ==========================================================================
+  # Secret Scanning
+  # ==========================================================================
+  secrets:
+    name: Secret Scanning
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog Scan
+        uses: trufflesecurity/trufflehog@4e02afb0159d0de9be6ceaa2064177f1b16f5033 # main
+        with:
+          extra_args: --only-verified
+        continue-on-error: true
+
+  # ==========================================================================
+  # Unsafe Code Analysis
+  # ==========================================================================
+  unsafe-check:
+    name: Unsafe Code Check
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger
+        continue-on-error: true
+
+      - name: Check unsafe code
+        run: cargo geiger --all-features || true
+        continue-on-error: true
+
+  # ==========================================================================
+  # OSSF Scorecard
+  # ==========================================================================
+  scorecard:
+    name: OSSF Scorecard
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@4a0b87a20cc42672e6c80e82e63b5cd8f25f108a # main
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+        continue-on-error: true
+
+  # ==========================================================================
+  # Security Success Gate
+  # ==========================================================================
+  security-success:
+    name: Security Success
+    runs-on: self-hosted
+    needs: [audit, deny, supply-chain]
+    if: always()
+    steps:
+      - name: Check security jobs
+        run: |
+          if [[ "${{ needs.audit.result }}" != "success" || \
+                "${{ needs.deny.result }}" != "success" ]]; then
+            echo "Security checks failed"
+            exit 1
+          fi
+          echo "Security checks passed"
