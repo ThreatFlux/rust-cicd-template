@@ -23,7 +23,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
   DOCKER_BUILDKIT: 1
 
 jobs:
@@ -40,10 +39,15 @@ jobs:
     outputs:
       image: ${{ steps.meta.outputs.tags }}
       digest: ${{ steps.build.outputs.digest }}
+      image_name: ${{ steps.lowercase.outputs.image_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+
+      - name: Lowercase image name
+        id: lowercase
+        run: echo "image_name=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
@@ -63,7 +67,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -95,7 +99,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          tags: ${{ env.IMAGE_NAME }}:scan
+          tags: ${{ steps.lowercase.outputs.image_name }}:scan
           outputs: type=docker,dest=/tmp/image.tar
           cache-from: type=gha
 
@@ -143,12 +147,12 @@ jobs:
 
       - name: Pull image
         if: github.event_name != 'pull_request'
-        run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        run: docker pull ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ github.sha }}
 
       - name: Run Trivy scanner
         uses: aquasecurity/trivy-action@22438a435773de8c97dc0958cc0b823c45b064ac # master
         with:
-          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', env.IMAGE_NAME) || format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, github.sha) }}
+          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', needs.build.outputs.image_name) || format('{0}/{1}:{2}', env.REGISTRY, needs.build.outputs.image_name, github.sha) }}
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
@@ -188,7 +192,7 @@ jobs:
       - name: Sign container image
         run: |
           cosign sign --yes \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
+            ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}@${{ needs.build.outputs.digest }}
         env:
           COSIGN_EXPERIMENTAL: 1
 
@@ -215,7 +219,7 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@0b82b0b1a22399a1c542d4d656f70cd903571b5c # main
         with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ github.sha }}
           artifact-name: sbom.spdx.json
           format: spdx-json
         continue-on-error: true
