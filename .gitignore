@@ -1,6 +1,8 @@
 # Generated files
 /target/
-Cargo.lock
+# Note: Cargo.lock IS committed for applications (reproducible builds)
+# Uncomment below for library-only crates:
+# Cargo.lock
 
 # IDE
 .idea/

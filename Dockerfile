@@ -1,6 +1,6 @@
 # ThreatFlux Rust Dockerfile
 # Multi-stage build for minimal production images
-# Version: 1.0.0
+# Version: 1.1.0
 
 # =============================================================================
 # Build Stage
@@ -11,6 +11,7 @@ FROM rust:1.92-bookworm AS builder
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
+ARG BINARY_NAME=rust-cicd-template
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -25,13 +26,14 @@ USER builder
 WORKDIR /build
 
 # Copy manifests first for better caching
-COPY --chown=builder:builder Cargo.toml Cargo.lock ./
+COPY --chown=builder:builder Cargo.toml Cargo.lock* ./
 
 # Create dummy src for dependency caching
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies only
-RUN cargo build --release && rm -rf src target/release/deps/$(basename $(pwd))*
+# Build dependencies only (ignore errors if no deps)
+RUN cargo build --release 2>/dev/null || true
+RUN rm -rf src target/release/deps/${BINARY_NAME}* 2>/dev/null || true
 
 # Copy actual source
 COPY --chown=builder:builder src ./src
@@ -48,6 +50,7 @@ FROM debian:bookworm-slim AS runtime
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
+ARG BINARY_NAME=rust-cicd-template
 
 # Labels
 LABEL org.opencontainers.image.title="ThreatFlux Application" \
@@ -67,7 +70,7 @@ RUN apt-get update && apt-get install -y \
     && useradd -m -u 1000 app
 
 # Copy binary from builder
-COPY --from=builder /build/target/release/app /usr/local/bin/app
+COPY --from=builder /build/target/release/${BINARY_NAME} /usr/local/bin/app
 
 # Set ownership
 RUN chown app:app /usr/local/bin/app
