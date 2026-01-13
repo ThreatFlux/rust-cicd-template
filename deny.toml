@@ -23,7 +23,7 @@ all-features = true
 # Confidence threshold for license detection
 confidence-threshold = 0.8
 
-# Allowed licenses
+# Allow specific licenses (using SPDX identifiers)
 allow = [
     "MIT",
     "Apache-2.0",
@@ -40,24 +40,14 @@ allow = [
     "0BSD",
 ]
 
-# Denied licenses
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-3.0",
-    "LGPL-2.0",
-    "LGPL-2.1",
-    "LGPL-3.0",
-]
-
-# Lint level for unlicensed crates
-unlicensed = "deny"
-
-# Copyleft handling
-copyleft = "warn"
-
 # Private crates can have any license
 private = { ignore = true }
+
+# Clarify licenses for specific crates if needed
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 # =============================================================================
 # Bans
