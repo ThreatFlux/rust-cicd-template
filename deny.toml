@@ -69,9 +69,6 @@ multiple-versions = "warn"
 # Wildcards in version specs
 wildcards = "warn"
 
-# Allow-by-default, use skip list
-allow-build-scripts = true
-
 # Highlight which crate pulled in duplicates
 highlight = "all"
 
