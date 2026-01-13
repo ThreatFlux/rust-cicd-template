@@ -1,4 +1,4 @@
-//! ThreatFlux Rust CI/CD Template Library
+//! `ThreatFlux` Rust CI/CD Template Library
 //!
 //! This is a minimal example library demonstrating CI/CD best practices.
 
@@ -10,7 +10,8 @@
 /// use rust_cicd_template::add;
 /// assert_eq!(add(2, 3), 5);
 /// ```
-pub fn add(a: i32, b: i32) -> i32 {
+#[must_use]
+pub const fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 

@@ -1,4 +1,4 @@
-//! ThreatFlux Rust CI/CD Template
+//! `ThreatFlux` Rust CI/CD Template
 //!
 //! This is a minimal example project demonstrating CI/CD best practices.
 
