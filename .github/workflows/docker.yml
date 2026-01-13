@@ -137,6 +137,10 @@ jobs:
         if: github.event_name == 'pull_request'
         run: docker load -i /tmp/image.tar
 
+      - name: Get short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
       - name: Log in to registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
@@ -147,12 +151,12 @@ jobs:
 
       - name: Pull image
         if: github.event_name != 'pull_request'
-        run: docker pull ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ github.sha }}
+        run: docker pull ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
 
       - name: Run Trivy scanner
         uses: aquasecurity/trivy-action@22438a435773de8c97dc0958cc0b823c45b064ac # master
         with:
-          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', needs.build.outputs.image_name) || format('{0}/{1}:{2}', env.REGISTRY, needs.build.outputs.image_name, github.sha) }}
+          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', needs.build.outputs.image_name) || format('{0}/{1}:{2}', env.REGISTRY, needs.build.outputs.image_name, steps.sha.outputs.short) }}
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
@@ -209,6 +213,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
+      - name: Get short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
       - name: Log in to registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
         with:
@@ -219,7 +227,7 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@0b82b0b1a22399a1c542d4d656f70cd903571b5c # main
         with:
-          image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ github.sha }}
+          image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
           artifact-name: sbom.spdx.json
           format: spdx-json
         continue-on-error: true
