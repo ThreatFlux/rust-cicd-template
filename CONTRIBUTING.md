@@ -169,6 +169,7 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ## Questions?
 
+- **Email**: admin@threatflux.ai
 - Open a [Discussion](https://github.com/threatflux/PROJECT_NAME/discussions)
 - Check existing [Issues](https://github.com/threatflux/PROJECT_NAME/issues)
 

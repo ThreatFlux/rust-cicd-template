@@ -95,6 +95,31 @@ Use conventional commits for automatic changelog generation:
 - `chore:` - Maintenance
 - `docs:` - Documentation
 
+## Database Migrations
+
+ThreatFlux projects use **embedded migrations** - all SQL is in Rust code, not separate files:
+
+```rust
+// src/migrations.rs - Migrations run automatically on startup
+pub const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, email TEXT UNIQUE);",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
+];
+```
+
+Key principles:
+- No separate `.sql` migration files
+- Idempotent statements (`IF NOT EXISTS`)
+- Auto-run on server startup
+- Single binary deployment
+
+See [docs/README_STANDARDS.md](docs/README_STANDARDS.md) for details.
+
+## Contact
+
+- **Email**: admin@threatflux.ai
+- **Security Issues**: See [SECURITY.md](SECURITY.md)
+
 ## License
 
 MIT - ThreatFlux
