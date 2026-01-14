@@ -12,7 +12,7 @@
 
 ### How to Report
 
-1. **Email**: Send details to admin@threatflux.ai
+1. **Email**: Send details to security@threatflux.ai
 2. **GitHub Security Advisories**: Use the [Security tab](https://github.com/threatflux/PROJECT_NAME/security/advisories) to report privately
 
 ### What to Include

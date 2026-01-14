@@ -117,8 +117,11 @@ See [docs/README_STANDARDS.md](docs/README_STANDARDS.md) for details.
 
 ## Contact
 
-- **Email**: admin@threatflux.ai
-- **Security Issues**: See [SECURITY.md](SECURITY.md)
+- **General**: admin@threatflux.ai
+- **Security**: security@threatflux.ai
+- **Privacy**: privacy@threatflux.ai
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 
