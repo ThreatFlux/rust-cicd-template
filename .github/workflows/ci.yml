@@ -49,7 +49,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: |
             ~/.cargo/registry/index
@@ -125,7 +125,7 @@ jobs:
           echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
 
       - name: Cache cargo
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: |
             ~/.cargo/registry/index
@@ -161,7 +161,7 @@ jobs:
           toolchain: "1.92.0"
 
       - name: Cache cargo
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: |
             ~/.cargo/registry/index
@@ -189,12 +189,12 @@ jobs:
           toolchain: stable
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@3522286d40783523f9c7880e33f785905b4c20d0 # main
+        uses: taiki-e/install-action@542cebaaed782771e619bd5609d97659d109c492 # main
         with:
           tool: cargo-hack
 
       - name: Cache cargo
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: |
             ~/.cargo/registry/index
@@ -253,7 +253,7 @@ jobs:
           toolchain: stable
 
       - name: Cache cargo
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: |
             ~/.cargo/registry/index
@@ -283,12 +283,12 @@ jobs:
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@3522286d40783523f9c7880e33f785905b4c20d0 # main
+        uses: taiki-e/install-action@542cebaaed782771e619bd5609d97659d109c492 # main
         with:
           tool: cargo-llvm-cov
 
       - name: Cache cargo
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v4
         with:
           path: |
             ~/.cargo/registry/index

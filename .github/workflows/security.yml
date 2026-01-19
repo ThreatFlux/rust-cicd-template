@@ -33,7 +33,7 @@ jobs:
           toolchain: stable
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@3522286d40783523f9c7880e33f785905b4c20d0 # main
+        uses: taiki-e/install-action@542cebaaed782771e619bd5609d97659d109c492 # main
         with:
           tool: cargo-audit
 
@@ -67,7 +67,7 @@ jobs:
           toolchain: stable
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@3522286d40783523f9c7880e33f785905b4c20d0 # main
+        uses: taiki-e/install-action@542cebaaed782771e619bd5609d97659d109c492 # main
         with:
           tool: cargo-deny
 
@@ -158,7 +158,7 @@ jobs:
           fetch-depth: 0
 
       - name: TruffleHog Scan
-        uses: trufflesecurity/trufflehog@4e02afb0159d0de9be6ceaa2064177f1b16f5033 # main
+        uses: trufflesecurity/trufflehog@913d7a0691febedaacd5c874672bdcbb62c48abe # main
         with:
           extra_args: --only-verified
         continue-on-error: true
