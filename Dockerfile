@@ -5,7 +5,7 @@
 # =============================================================================
 # Build Stage
 # =============================================================================
-FROM rust:1.92-bookworm AS builder
+FROM rust:1.93-bookworm AS builder
 
 # Build arguments
 ARG VERSION=0.0.0
