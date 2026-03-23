@@ -1,20 +1,21 @@
-# Project Name
+# PROJECT_NAME
 
 [![Crates.io](https://img.shields.io/crates/v/PROJECT_NAME.svg)](https://crates.io/crates/PROJECT_NAME)
 [![Documentation](https://docs.rs/PROJECT_NAME/badge.svg)](https://docs.rs/PROJECT_NAME)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](https://www.rust-lang.org)
-[![CI](https://github.com/threatflux/PROJECT_NAME/actions/workflows/ci.yml/badge.svg)](https://github.com/threatflux/PROJECT_NAME/actions/workflows/ci.yml)
-[![Security](https://github.com/threatflux/PROJECT_NAME/actions/workflows/security.yml/badge.svg)](https://github.com/threatflux/PROJECT_NAME/actions/workflows/security.yml)
-[![codecov](https://codecov.io/gh/threatflux/PROJECT_NAME/branch/main/graph/badge.svg)](https://codecov.io/gh/threatflux/PROJECT_NAME)
+[![Rust](https://img.shields.io/badge/rust-1.94%2B-orange.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/ThreatFlux/PROJECT_NAME/actions/workflows/ci.yml/badge.svg)](https://github.com/ThreatFlux/PROJECT_NAME/actions/workflows/ci.yml)
+[![Security](https://github.com/ThreatFlux/PROJECT_NAME/actions/workflows/security.yml/badge.svg)](https://github.com/ThreatFlux/PROJECT_NAME/actions/workflows/security.yml)
 
-> One-line description of what this project does.
+> PROJECT_DESCRIPTION
+
+`PROJECT_NAME` is a Rust project generated from the ThreatFlux CI/CD template. Replace all placeholders before the first merge by running `make template-check`.
 
 ## Features
 
-- **Feature 1** - Brief description of this feature
-- **Feature 2** - Brief description of this feature
-- **Feature 3** - Brief description of this feature
+- Clear value proposition
+- Main public capabilities
+- Operational and integration highlights
 
 ## Installation
 
@@ -40,10 +41,8 @@ PROJECT_NAME = { version = "0.1.0", features = ["feature1", "feature2"] }
 ## Quick Start
 
 ```rust
-use PROJECT_NAME::prelude::*;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Example code here
+    // Replace with a real runnable example.
     Ok(())
 }
 ```
@@ -52,15 +51,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Basic Usage
 
-```rust
-// Basic usage example
-```
+Document one common path that a user can paste and run quickly.
 
 ### Advanced Usage
 
-```rust
-// Advanced usage example
-```
+Document one advanced or production-oriented path.
 
 ## API Reference
 
@@ -76,26 +71,18 @@ Full API documentation is available at [docs.rs](https://docs.rs/PROJECT_NAME).
 
 ### Prerequisites
 
-- Rust 1.92.0 or later
+- Rust 1.94.0 or later
 - Additional dependencies if any
 
 ### Building
 
 ```bash
-# Clone the repository
-git clone https://github.com/threatflux/PROJECT_NAME.git
+git clone https://github.com/YOUR_USERNAME/PROJECT_NAME.git
 cd PROJECT_NAME
 
-# Install development tools
 make dev-setup
-
-# Build
 make build
-
-# Run tests
 make test
-
-# Run CI checks locally
 make ci
 ```
 
@@ -109,12 +96,6 @@ make lint          # Run clippy
 make fmt           # Format code
 make ci            # Run full CI checks
 make coverage      # Generate coverage report
-```
-
-## Benchmarks
-
-```bash
-make bench
 ```
 
 ## Contributing
@@ -133,13 +114,6 @@ Please see our [Security Policy](SECURITY.md) for reporting vulnerabilities.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-## Acknowledgments
-
-- Acknowledgment 1
-- Acknowledgment 2
-
----
-
-Made with Rust by [ThreatFlux](https://github.com/threatflux)
+Generated from the [ThreatFlux Rust CI/CD template](https://github.com/ThreatFlux/rust-cicd-template).

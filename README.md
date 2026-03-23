@@ -1,127 +1,120 @@
 # ThreatFlux Rust CI/CD Template
 
-Standardized CI/CD templates for Rust projects. Uses **Rust 1.92.0** as the minimum supported version.
+Standardized CI/CD templates for Rust applications and workspaces. Uses **Rust 1.94.0** as the maintained baseline and is designed to be copied into either a single-crate project or a workspace with an explicit CLI package.
 
-## Features
+## What This Template Includes
 
-- **Pinned GitHub Actions** - All actions use commit SHAs for security
-- **Self-hosted runners** - Configured for self-hosted infrastructure
-- **Comprehensive CI** - Format, lint, test, coverage, MSRV, feature testing
-- **Security scanning** - cargo-audit, cargo-deny, SBOM, secret scanning
-- **Multi-platform releases** - Linux (amd64/arm64), macOS (amd64/arm64), Windows
-- **Docker support** - Multi-arch builds with security scanning and signing
-- **Auto-release** - Automatic releases from conventional commits
+- Pinned GitHub Actions by commit SHA
+- Hosted-runner CI defaults with cross-platform test coverage
+- Strict formatting, clippy, docs, feature, coverage, and MSRV checks
+- Security workflows for audit, deny, secret scanning, SBOMs, and Scorecard
+- Multi-platform release packaging for Linux, macOS, and Windows
+- Docker build, scan, sign, and image SBOM generation
+- Auto-release flow based on conventional commits
+- Repo governance defaults: `CODEOWNERS`, issue templates, PR template, contributing, security, and code of conduct files
+- Bootstrap tooling: `.editorconfig`, `rust-toolchain.toml`, `clippy.toml`, `rustfmt.toml`, and optional `pre-commit`
 
 ## Quick Start
 
 ```bash
-# Clone this template
-gh repo create my-project --template threatflux/rust-cicd-template
+gh repo create my-project --template ThreatFlux/rust-cicd-template
+cd my-project
 
-# Or copy files to existing project
-cp -r .github Makefile deny.toml Dockerfile /path/to/your/project/
+# Replace template placeholders and repo defaults first.
+make template-check
 
-# Install development tools
+# Install local tooling and run CI locally.
 make dev-setup
-
-# Run CI checks locally
 make ci
 ```
+
+If you are copying files into an existing project instead of generating from the template, copy:
+
+```bash
+cp -r .github docs scripts .cargo \
+  Makefile Dockerfile deny.toml \
+  .editorconfig .pre-commit-config.yaml clippy.toml rustfmt.toml rust-toolchain.toml \
+  /path/to/your/project/
+```
+
+## Single Crate vs Workspace
+
+The template repo itself is a single binary crate, but the workflows and Makefile are parameterized so downstream repos can support either shape.
+
+Single-crate projects:
+- Keep `Cargo.toml` as the root package
+- Set `BINARY_NAME` in `Makefile` if the binary differs from the package name
+
+Workspace projects:
+- Convert the root manifest into a workspace
+- Set these repo variables or Makefile overrides:
+  - `RUST_TEMPLATE_BINARY_NAME`
+  - `RUST_TEMPLATE_BINARY_PACKAGE`
+  - `RUST_TEMPLATE_PUBLISH_PACKAGES`
+  - `RUST_TEMPLATE_SBOM_MANIFEST_PATH`
+
+See [docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md](docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md) for the full setup checklist.
 
 ## Workflows
 
 | Workflow | Purpose | Trigger |
 |----------|---------|---------|
-| `ci.yml` | Build, test, lint, coverage | Push, PR, Weekly |
-| `security.yml` | Security audit, license check, SBOM | Push, PR, Weekly |
-| `release.yml` | Multi-platform release builds | Tags |
-| `auto-release.yml` | Automatic version bumps | CI success |
-| `docker.yml` | Container builds with scanning | Push, PR, Weekly |
+| `ci.yml` | Format, lint, test, docs, coverage smoke, MSRV, feature checks | Push, PR, weekly |
+| `security.yml` | Audit, deny, SBOM, secret scanning, Scorecard | Push, PR, weekly |
+| `release.yml` | Build, package, publish, and attach release assets | Tags, manual |
+| `auto-release.yml` | Conventional-commit-driven release tagging | CI/Security success |
+| `docker.yml` | Build, scan, sign, and SBOM container images | Push, PR, weekly |
 
-## Makefile Targets
+## Bootstrap Requirements
+
+Before merging a generated repo, replace:
+- package, binary, and repository placeholders
+- starter description text
+- example usernames and repository URLs
+- default code owners
+- contact emails if they differ from ThreatFlux defaults
+
+Use:
 
 ```bash
-make help          # Show all targets
-make dev-setup     # Install development tools
-make ci            # Run full CI checks
-make ci-quick      # Run quick checks only
-make test          # Run tests
-make lint          # Run clippy
-make lint-strict   # Run strict clippy (pedantic + nursery)
-make coverage      # Generate code coverage
-make security      # Run security checks
-make docker-build  # Build Docker image
+make template-check
 ```
 
-## Configuration
+That target fails if obvious placeholders are still present.
 
-### Rust Version
+## Key Configuration
 
-MSRV is set to **1.92.0**. Update in:
-- `Cargo.toml` - `rust-version`
-- `Makefile` - `RUST_MSRV`
-- `.github/workflows/ci.yml` - MSRV job toolchain
-- `Dockerfile` - Base image version
+MSRV is set in:
+- `Cargo.toml`
+- `rust-toolchain.toml`
+- `Makefile`
+- `.github/workflows/ci.yml`
+- `.github/workflows/release.yml`
+- `.github/workflows/security.yml`
+- `Dockerfile`
 
-### Clippy Flags
+Release and packaging behavior can be overridden with:
+- `BINARY_NAME`
+- `BINARY_PACKAGE`
+- `SBOM_MANIFEST_PATH`
+- `PUBLISH_PACKAGES`
 
-Strict configuration (pedantic + nursery):
-```
--D warnings
--D clippy::all
--D clippy::pedantic
--D clippy::nursery
--A clippy::multiple_crate_versions
--A clippy::module_name_repetitions
--A clippy::missing_errors_doc
--A clippy::missing_panics_doc
--A clippy::must_use_candidate
-```
+Equivalent GitHub repository variables:
+- `RUST_TEMPLATE_BINARY_NAME`
+- `RUST_TEMPLATE_BINARY_PACKAGE`
+- `RUST_TEMPLATE_SBOM_MANIFEST_PATH`
+- `RUST_TEMPLATE_PUBLISH_PACKAGES`
 
-### Required Secrets
+## Required Secrets
 
 | Secret | Purpose |
 |--------|---------|
-| `CODECOV_TOKEN` | Coverage uploads |
-| `CARGO_REGISTRY_TOKEN` | crates.io publishing |
+| `GITHUB_TOKEN` | Release assets, package publishing, container publishing |
+| `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` | crates.io publishing |
 
-## Conventional Commits
+## Documentation Standards
 
-Use conventional commits for automatic changelog generation:
-
-- `feat:` - New features (bumps minor)
-- `fix:` - Bug fixes (bumps patch)
-- `BREAKING CHANGE:` - Breaking changes (bumps major)
-- `chore:` - Maintenance
-- `docs:` - Documentation
-
-## Database Migrations
-
-ThreatFlux projects use **embedded migrations** - all SQL is in Rust code, not separate files:
-
-```rust
-// src/migrations.rs - Migrations run automatically on startup
-pub const MIGRATIONS: &[&str] = &[
-    "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, email TEXT UNIQUE);",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
-];
-```
-
-Key principles:
-- No separate `.sql` migration files
-- Idempotent statements (`IF NOT EXISTS`)
-- Auto-run on server startup
-- Single binary deployment
-
-See [docs/README_STANDARDS.md](docs/README_STANDARDS.md) for details.
-
-## Contact
-
-- **General**: admin@threatflux.ai
-- **Security**: security@threatflux.ai
-- **Privacy**: privacy@threatflux.ai
-
-See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+README guidance lives in [docs/README_STANDARDS.md](docs/README_STANDARDS.md). The starter project README lives in [README_TEMPLATE.md](README_TEMPLATE.md).
 
 ## License
 

@@ -1,8 +1,7 @@
-# ThreatFlux Release Workflow
-# Automated release with multi-platform builds
-# Version: 1.1.0
-
 name: Release
+
+permissions:
+  contents: write
 
 on:
   push:
@@ -11,11 +10,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g., 1.0.0)"
+        description: Version to release (e.g. 1.0.0)
         required: true
         type: string
+      source_ref:
+        description: Git ref to build from
+        required: false
+        type: string
       prerelease:
-        description: "Is this a pre-release?"
+        description: Is this a pre-release?
         required: false
         type: boolean
         default: false
@@ -23,22 +26,35 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RUST_VERSION: 1.94.0
+  BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
+  BINARY_PACKAGE: ${{ vars.RUST_TEMPLATE_BINARY_PACKAGE || '' }}
+  SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
+  PUBLISH_PACKAGES: ${{ vars.RUST_TEMPLATE_PUBLISH_PACKAGES || '' }}
 
 jobs:
-  # ==========================================================================
-  # Prepare Release
-  # ==========================================================================
   prepare:
     name: Prepare Release
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      upload_url: ${{ steps.release.outputs.upload_url }}
+      source_ref: ${{ steps.source_ref.outputs.source_ref }}
     steps:
+      - name: Determine source ref
+        id: source_ref
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.source_ref }}" ]]; then
+            SOURCE_REF="${{ github.event.inputs.source_ref }}"
+          else
+            SOURCE_REF="${GITHUB_REF}"
+          fi
+          echo "source_ref=${SOURCE_REF}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          ref: ${{ steps.source_ref.outputs.source_ref }}
 
       - name: Determine version
         id: version
@@ -48,7 +64,7 @@ jobs:
           else
             VERSION=${GITHUB_REF#refs/tags/v}
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Validate version format
         run: |
@@ -67,22 +83,31 @@ jobs:
             awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | sed '1d;$d' >> release_notes.md 2>/dev/null || echo "See CHANGELOG.md for details" >> release_notes.md
           fi
 
-      - name: Create GitHub Release
-        id: release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: ${{ github.event.inputs.prerelease || contains(steps.version.outputs.version, '-') }}
-          generate_release_notes: true
+      - name: Create or update GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v${VERSION}"
+          TITLE="Release v${VERSION}"
+          IS_PRERELEASE="false"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.prerelease && 'true' || 'false' }}" == "true" ]]; then
+            IS_PRERELEASE="true"
+          fi
+          if [[ "${VERSION}" == *-* ]]; then
+            IS_PRERELEASE="true"
+          fi
 
-  # ==========================================================================
-  # Build Release Artifacts
-  # ==========================================================================
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file release_notes.md
+          else
+            if [[ "${IS_PRERELEASE}" == "true" ]]; then
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file release_notes.md --prerelease
+            else
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file release_notes.md
+            fi
+          fi
+
   build:
     name: Build (${{ matrix.target }})
     needs: prepare
@@ -90,41 +115,41 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: self-hosted
+          - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: linux-amd64
-          - os: self-hosted
+          - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             artifact: linux-musl-amd64
             use_cross: true
-          - os: self-hosted
+          - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             artifact: linux-arm64
             use_cross: true
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             artifact: macos-arm64
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: macos-amd64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: windows-amd64
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
-
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
 
       - name: Install dependencies (Ubuntu)
-        if: contains(matrix.os, 'self-hosted') || contains(matrix.os, 'ubuntu')
+        if: contains(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config
@@ -135,37 +160,44 @@ jobs:
 
       - name: Build (cross)
         if: matrix.use_cross
-        run: cross build --release --target ${{ matrix.target }} --all-features
+        run: |
+          if [[ -n "${BINARY_PACKAGE}" ]]; then
+            cross build --release --target ${{ matrix.target }} -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features
+          else
+            cross build --release --target ${{ matrix.target }} --bin "${BINARY_NAME}" --all-features || cross build --release --target ${{ matrix.target }} --all-features
+          fi
 
       - name: Build (native)
         if: "!matrix.use_cross"
-        run: cargo build --release --target ${{ matrix.target }} --all-features
+        run: |
+          if [[ -n "${BINARY_PACKAGE}" ]]; then
+            cargo build --release --target ${{ matrix.target }} -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features
+          else
+            cargo build --release --target ${{ matrix.target }} --bin "${BINARY_NAME}" --all-features || cargo build --release --target ${{ matrix.target }} --all-features
+          fi
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
-          BINARY_NAME=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].name')
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/$BINARY_NAME dist/ 2>/dev/null || true
+          cp target/${{ matrix.target }}/release/${BINARY_NAME} dist/
           cd dist
-          tar czf ../$BINARY_NAME-${{ matrix.artifact }}.tar.gz *
+          tar czf ../${BINARY_NAME}-${{ matrix.artifact }}.tar.gz *
           cd ..
-          shasum -a 256 $BINARY_NAME-${{ matrix.artifact }}.tar.gz > $BINARY_NAME-${{ matrix.artifact }}.tar.gz.sha256
+          shasum -a 256 ${BINARY_NAME}-${{ matrix.artifact }}.tar.gz > ${BINARY_NAME}-${{ matrix.artifact }}.tar.gz.sha256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $meta = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $name = $meta.packages[0].name
           mkdir dist
-          Copy-Item "target/${{ matrix.target }}/release/$name.exe" dist/
-          Compress-Archive -Path dist/* -DestinationPath "$name-${{ matrix.artifact }}.zip"
-          Get-FileHash "$name-${{ matrix.artifact }}.zip" -Algorithm SHA256 | Format-List
+          Copy-Item "target/${{ matrix.target }}/release/${env:BINARY_NAME}.exe" dist/
+          Compress-Archive -Path dist/* -DestinationPath "${env:BINARY_NAME}-${{ matrix.artifact }}.zip"
+          Get-FileHash "${env:BINARY_NAME}-${{ matrix.artifact }}.zip" -Algorithm SHA256 | Format-List
 
       - name: Upload artifacts (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: release-${{ matrix.artifact }}
           path: "*.tar.gz*"
@@ -173,22 +205,52 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: release-${{ matrix.artifact }}
           path: "*.zip"
           retention-days: 5
 
-  # ==========================================================================
-  # Upload Release Assets
-  # ==========================================================================
+  sbom:
+    name: Generate Release SBOMs
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2.68.27
+        with:
+          tool: cargo-cyclonedx@0.5.8
+
+      - name: Generate SBOM files
+        run: |
+          make sbom BINARY_NAME="${BINARY_NAME}" SBOM_MANIFEST_PATH="${SBOM_MANIFEST_PATH}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          mv "sbom/${BINARY_NAME}-sbom.json" "sbom/${BINARY_NAME}-v${VERSION}.cdx.json"
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: release-sbom
+          path: sbom/*.json
+          retention-days: 5
+
   upload-assets:
     name: Upload Release Assets
-    needs: [prepare, build]
-    runs-on: self-hosted
+    needs: [prepare, build, sbom]
+    runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           pattern: release-*
@@ -197,60 +259,63 @@ jobs:
         run: |
           for file in artifacts/**/*; do
             if [ -f "$file" ]; then
-              gh release upload "v${{ needs.prepare.outputs.version }}" "$file" --clobber || true
+              gh release upload "v${{ needs.prepare.outputs.version }}" "$file" --clobber
             fi
           done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ==========================================================================
-  # Publish to crates.io
-  # ==========================================================================
   publish:
     name: Publish to crates.io
     needs: [prepare, build]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     if: "!contains(needs.prepare.outputs.version, '-')"
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Check crates.io token
         id: check_token
         run: |
-          if [ -n "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
-            echo "has_token=true" >> $GITHUB_OUTPUT
+          TOKEN="${{ secrets.CRATES_IO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}"
+          if [ -n "$TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_token=false" >> $GITHUB_OUTPUT
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
             echo "Skipping crates.io publish - token not configured"
           fi
 
       - name: Publish to crates.io
         if: steps.check_token.outputs.has_token == 'true'
-        run: cargo publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        continue-on-error: true
-
-  # ==========================================================================
-  # Release Success Gate
-  # ==========================================================================
-  release-success:
-    name: Release Success
-    runs-on: self-hosted
-    needs: [prepare, build, upload-assets]
-    if: always()
-    steps:
-      - name: Check release status
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          if [[ "${{ needs.prepare.result }}" != "success" ]]; then
-            echo "Release preparation failed"
-            exit 1
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          if [[ -n "${PUBLISH_PACKAGES}" ]]; then
+            for package in ${PUBLISH_PACKAGES}; do
+              cargo publish -p "${package}" --locked
+              for _ in $(seq 1 20); do
+                if curl -fsSL "https://crates.io/api/v1/crates/${package}" | python3 - "$VERSION" <<'PY'
+import json
+import sys
+payload = json.load(sys.stdin)
+version = sys.argv[1]
+raise SystemExit(0 if any(v["num"] == version for v in payload.get("versions", [])) else 1)
+PY
+                then
+                  break
+                fi
+                sleep 15
+              done
+            done
+          else
+            cargo publish --locked
           fi
-          echo "Release completed successfully"
-          echo "Version: ${{ needs.prepare.outputs.version }}"

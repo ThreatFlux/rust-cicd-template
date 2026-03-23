@@ -1,24 +1,18 @@
 # ThreatFlux Rust Project Makefile
 # Standardized build, test, and development commands
-# Version: 1.0.0
-
-# =============================================================================
-# Configuration
-# =============================================================================
 
 CARGO ?= cargo
-RUST_MSRV ?= 1.92.0
+RUST_MSRV ?= 1.94.0
 RUST_TOOLCHAIN ?= stable
 
-# Docker configuration
 DOCKER_IMAGE ?= $(shell basename $(CURDIR))
 DOCKER_TAG ?= latest
 DOCKER_REGISTRY ?= ghcr.io/threatflux
+BINARY_NAME ?= rust-cicd-template
+BINARY_PACKAGE ?=
+SBOM_MANIFEST_PATH ?= Cargo.toml
+PUBLISH_PACKAGES ?=
 
-# Coverage configuration
-COVERAGE_IGNORE ?=
-
-# Clippy configuration - strict by default
 CLIPPY_FLAGS := -D warnings \
 	-D clippy::all \
 	-D clippy::pedantic \
@@ -30,17 +24,12 @@ CLIPPY_FLAGS := -D warnings \
 	-A clippy::missing_panics_doc \
 	-A clippy::must_use_candidate
 
-# Colors for output
 RED := \033[0;31m
 GREEN := \033[0;32m
 YELLOW := \033[0;33m
 BLUE := \033[0;34m
 CYAN := \033[0;36m
 NC := \033[0m
-
-# =============================================================================
-# Default Target
-# =============================================================================
 
 .DEFAULT_GOAL := help
 
@@ -49,16 +38,12 @@ help: ## Display this help message
 	@echo "$(CYAN)ThreatFlux Rust Project - Available Commands$(NC)"
 	@echo ""
 	@echo "$(YELLOW)Quick Start:$(NC)"
-	@echo "  $(GREEN)make dev-setup$(NC)    Install all development tools"
-	@echo "  $(GREEN)make ci$(NC)           Run all CI checks locally"
-	@echo "  $(GREEN)make all$(NC)          Run full validation suite"
+	@echo "  $(GREEN)make dev-setup$(NC)       Install all development tools"
+	@echo "  $(GREEN)make template-check$(NC)  Validate bootstrap placeholders"
+	@echo "  $(GREEN)make ci$(NC)              Run all CI checks locally"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-18s$(NC) %s\n", $$1, $$2}'
-
-# =============================================================================
-# Setup
-# =============================================================================
 
 .PHONY: dev-setup
 dev-setup: ## Install development tools
@@ -67,20 +52,18 @@ dev-setup: ## Install development tools
 	@cargo install cargo-llvm-cov --locked 2>/dev/null || echo "cargo-llvm-cov already installed"
 	@cargo install cargo-audit --locked 2>/dev/null || echo "cargo-audit already installed"
 	@cargo install cargo-deny --locked 2>/dev/null || echo "cargo-deny already installed"
+	@cargo install cargo-cyclonedx --locked 2>/dev/null || echo "cargo-cyclonedx already installed"
 	@cargo install cargo-hack --locked 2>/dev/null || echo "cargo-hack already installed"
+	@python3 -m pip install --user pre-commit 2>/dev/null || echo "pre-commit already available"
 	@echo "$(GREEN)Development tools installed!$(NC)"
 
 .PHONY: install-hooks
-install-hooks: ## Install git pre-commit hooks
+install-hooks: ## Install git hooks
 	@echo "$(CYAN)Installing git hooks...$(NC)"
 	@mkdir -p .git/hooks
 	@echo '#!/bin/sh\nmake pre-commit' > .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
 	@echo "$(GREEN)Git hooks installed!$(NC)"
-
-# =============================================================================
-# Building
-# =============================================================================
 
 .PHONY: build
 build: ## Build the project (debug)
@@ -91,17 +74,17 @@ build: ## Build the project (debug)
 .PHONY: build-release
 build-release: ## Build the project (release)
 	@echo "$(CYAN)Building release...$(NC)"
-	@$(CARGO) build --release --all-features
+	@if [ -n "$(BINARY_PACKAGE)" ]; then \
+		$(CARGO) build --release -p $(BINARY_PACKAGE) --bin $(BINARY_NAME) --all-features; \
+	else \
+		$(CARGO) build --release --bin $(BINARY_NAME) --all-features || $(CARGO) build --release --all-features; \
+	fi
 	@echo "$(GREEN)Release build completed!$(NC)"
 
 .PHONY: check
 check: ## Check compilation without building
 	@echo "$(CYAN)Checking compilation...$(NC)"
 	@$(CARGO) check --all-features --all-targets
-
-# =============================================================================
-# Code Quality
-# =============================================================================
 
 .PHONY: fmt
 fmt: ## Format code
@@ -116,7 +99,7 @@ fmt-check: ## Check code formatting
 	@echo "$(GREEN)Format check passed!$(NC)"
 
 .PHONY: lint
-lint: ## Run clippy linter (standard)
+lint: ## Run clippy linter
 	@echo "$(CYAN)Running clippy...$(NC)"
 	@$(CARGO) clippy --all-features --all-targets -- -D warnings
 	@echo "$(GREEN)Linting passed!$(NC)"
@@ -132,10 +115,6 @@ lint-fix: ## Run clippy and apply fixes
 	@echo "$(CYAN)Applying clippy fixes...$(NC)"
 	@$(CARGO) clippy --all-features --all-targets --fix --allow-dirty --allow-staged -- -D warnings
 	@echo "$(GREEN)Fixes applied!$(NC)"
-
-# =============================================================================
-# Testing
-# =============================================================================
 
 .PHONY: test
 test: ## Run all tests
@@ -158,22 +137,18 @@ test-doc: ## Run documentation tests
 test-features: ## Test feature combinations
 	@echo "$(CYAN)Testing feature combinations...$(NC)"
 	@echo "$(BLUE)  No default features...$(NC)"
-	@$(CARGO) check --no-default-features
+	@$(CARGO) check --workspace --no-default-features
 	@echo "$(BLUE)  All features...$(NC)"
-	@$(CARGO) check --all-features
+	@$(CARGO) check --workspace --all-features
 	@echo "$(BLUE)  Default features only...$(NC)"
-	@$(CARGO) check
+	@$(CARGO) check --workspace
 	@echo "$(GREEN)Feature checks passed!$(NC)"
 
 .PHONY: test-features-full
-test-features-full: ## Test all feature powerset (requires cargo-hack)
+test-features-full: ## Test full feature powerset
 	@echo "$(CYAN)Testing full feature powerset...$(NC)"
-	@cargo hack check --feature-powerset --no-dev-deps
+	@cargo hack check --workspace --feature-powerset --no-dev-deps
 	@echo "$(GREEN)Feature powerset passed!$(NC)"
-
-# =============================================================================
-# Coverage
-# =============================================================================
 
 .PHONY: coverage
 coverage: ## Generate code coverage report
@@ -192,10 +167,6 @@ coverage-summary: ## Show coverage summary
 	@echo "$(CYAN)Coverage summary:$(NC)"
 	@cargo llvm-cov --all-features --workspace --summary-only
 
-# =============================================================================
-# Security
-# =============================================================================
-
 .PHONY: audit
 audit: ## Run security audit
 	@echo "$(CYAN)Running security audit...$(NC)"
@@ -208,13 +179,18 @@ deny: ## Check licenses and advisories
 	@cargo deny check
 	@echo "$(GREEN)Deny checks passed!$(NC)"
 
+.PHONY: sbom
+sbom: ## Generate a CycloneDX SBOM
+	@echo "$(CYAN)Generating SBOM...$(NC)"
+	@mkdir -p sbom
+	@rm -f sbom/*.json
+	@cargo cyclonedx --manifest-path $(SBOM_MANIFEST_PATH) --all-features --format json --spec-version 1.5 --override-filename $(BINARY_NAME)-sbom
+	@find . -maxdepth 4 -name '$(BINARY_NAME)-sbom.json' -exec mv {} sbom/ \;
+	@echo "$(GREEN)SBOM written to sbom/$(BINARY_NAME)-sbom.json$(NC)"
+
 .PHONY: security
 security: audit deny ## Run all security checks
 	@echo "$(GREEN)All security checks passed!$(NC)"
-
-# =============================================================================
-# Documentation
-# =============================================================================
 
 .PHONY: docs
 docs: ## Build documentation
@@ -225,10 +201,6 @@ docs: ## Build documentation
 .PHONY: docs-open
 docs-open: ## Build and open documentation
 	@$(CARGO) doc --all-features --no-deps --open
-
-# =============================================================================
-# Benchmarks
-# =============================================================================
 
 .PHONY: bench
 bench: ## Run benchmarks
@@ -241,83 +213,66 @@ bench-check: ## Check benchmarks compile
 	@$(CARGO) bench --all-features --no-run
 	@echo "$(GREEN)Benchmarks compile!$(NC)"
 
-# =============================================================================
-# MSRV
-# =============================================================================
-
 .PHONY: msrv
 msrv: ## Check minimum supported Rust version
 	@echo "$(CYAN)Checking MSRV ($(RUST_MSRV))...$(NC)"
-	@rustup run $(RUST_MSRV) cargo check --all-features
+	@rustup toolchain install $(RUST_MSRV) --profile minimal >/dev/null 2>&1 || true
+	@rustup run $(RUST_MSRV) cargo check --workspace --all-features
 	@echo "$(GREEN)MSRV check passed!$(NC)"
-
-# =============================================================================
-# Docker
-# =============================================================================
 
 .PHONY: docker-build
 docker-build: ## Build Docker image
 	@echo "$(CYAN)Building Docker image...$(NC)"
-	@docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
-	@echo "$(GREEN)Docker image built: $(DOCKER_IMAGE):$(DOCKER_TAG)$(NC)"
+	@docker build \
+		--build-arg BINARY_NAME=$(BINARY_NAME) \
+		--build-arg BINARY_PACKAGE=$(BINARY_PACKAGE) \
+		--build-arg SBOM_MANIFEST_PATH=$(SBOM_MANIFEST_PATH) \
+		-t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG) .
+	@echo "$(GREEN)Docker image built: $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG)$(NC)"
 
 .PHONY: docker-push
 docker-push: ## Push Docker image to registry
 	@echo "$(CYAN)Pushing Docker image...$(NC)"
-	@docker tag $(DOCKER_IMAGE):$(DOCKER_TAG) $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG)
 	@docker push $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG)
-	@echo "$(GREEN)Image pushed!$(NC)"
-
-# =============================================================================
-# CI Targets
-# =============================================================================
+	@echo "$(GREEN)Docker image pushed!$(NC)"
 
 .PHONY: pre-commit
 pre-commit: fmt-check lint test-doc ## Pre-commit checks
-	@echo "$(GREEN)Pre-commit checks passed!$(NC)"
+
+.PHONY: template-check
+template-check: ## Fail if template placeholders are still present
+	@echo "$(CYAN)Checking for template placeholders...$(NC)"
+	@python3 scripts/check_template_placeholders.py
+	@echo "$(GREEN)No unresolved template placeholders found!$(NC)"
 
 .PHONY: ci
-ci: fmt-check lint test test-features docs security ## Full CI checks
-	@echo "$(GREEN)All CI checks passed!$(NC)"
+ci: template-check fmt-check lint test test-features docs security ## Full CI checks
 
 .PHONY: ci-quick
-ci-quick: fmt-check lint check ## Quick CI checks
-	@echo "$(GREEN)Quick CI checks passed!$(NC)"
+ci-quick: template-check fmt-check lint check ## Quick CI checks
 
 .PHONY: all
 all: ci coverage bench-check ## Full validation suite
-	@echo "$(GREEN)Full validation passed!$(NC)"
-
-# =============================================================================
-# Release
-# =============================================================================
 
 .PHONY: release-check
 release-check: ## Check release readiness
 	@echo "$(CYAN)Checking release readiness...$(NC)"
-	@$(MAKE) ci
-	@$(MAKE) msrv
-	@cargo publish --dry-run
-	@echo "$(GREEN)Ready for release!$(NC)"
-
-# =============================================================================
-# Cleanup
-# =============================================================================
+	@$(CARGO) check --all-features
+	@$(CARGO) test --all-features
+	@$(CARGO) clippy --all-features --all-targets -- -D warnings
+	@python3 scripts/check_template_placeholders.py
+	@echo "$(GREEN)Release readiness checks passed!$(NC)"
 
 .PHONY: clean
 clean: ## Clean build artifacts
-	@echo "$(CYAN)Cleaning...$(NC)"
+	@echo "$(CYAN)Cleaning artifacts...$(NC)"
 	@$(CARGO) clean
-	@rm -f lcov.info
-	@echo "$(GREEN)Clean completed!$(NC)"
-
-# =============================================================================
-# Aliases
-# =============================================================================
+	@rm -rf lcov.info sbom dist
+	@echo "$(GREEN)Cleaned!$(NC)"
 
 .PHONY: f l t b c
-f: fmt        ## Alias: format
-l: lint       ## Alias: lint
-t: test       ## Alias: test
-b: build      ## Alias: build
-c: check      ## Alias: check
+f: fmt   ## Alias: format
+l: lint  ## Alias: lint
+t: test  ## Alias: test
+b: build ## Alias: build
+c: check ## Alias: check

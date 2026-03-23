@@ -1,90 +1,74 @@
 # ThreatFlux Rust Dockerfile
-# Multi-stage build for minimal production images
-# Version: 1.1.0
+# Multi-stage build for single-crate or workspace-based applications.
 
-# =============================================================================
-# Build Stage
-# =============================================================================
-FROM rust:1.92-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
 
-# Build arguments
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG BINARY_NAME=rust-cicd-template
+ARG BINARY_PACKAGE=
+ARG SBOM_MANIFEST_PATH=Cargo.toml
 
-# Install build dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create build user
 RUN useradd -m -u 1000 builder
 USER builder
-
 WORKDIR /build
 
-# Copy manifests first for better caching
-COPY --chown=builder:builder Cargo.toml Cargo.lock* ./
+COPY --chown=builder:builder . .
 
-# Create dummy src for dependency caching
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN if [ -n "${BINARY_PACKAGE}" ]; then \
+      cargo build --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features; \
+    else \
+      cargo build --release --bin "${BINARY_NAME}" --all-features || cargo build --release --all-features; \
+    fi
 
-# Build dependencies only (ignore errors if no deps)
-RUN cargo build --release 2>/dev/null || true
-RUN rm -rf src target/release/deps/${BINARY_NAME}* 2>/dev/null || true
+RUN cargo install cargo-cyclonedx --locked --version 0.5.8 && \
+    cargo cyclonedx \
+      --manifest-path "${SBOM_MANIFEST_PATH}" \
+      --all-features \
+      --format json \
+      --spec-version 1.5 \
+      --override-filename "${BINARY_NAME}-sbom"
 
-# Copy actual source
-COPY --chown=builder:builder src ./src
-
-# Build release binary
-RUN cargo build --release --all-features
-
-# =============================================================================
-# Runtime Stage
-# =============================================================================
 FROM debian:bookworm-slim AS runtime
 
-# Build arguments
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG BINARY_NAME=rust-cicd-template
 
-# Labels
 LABEL org.opencontainers.image.title="ThreatFlux Application" \
       org.opencontainers.image.description="ThreatFlux Rust Application" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.vendor="ThreatFlux" \
-      org.opencontainers.image.source="https://github.com/threatflux"
+      org.opencontainers.image.source="https://github.com/ThreatFlux"
 
-# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     tini \
     && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /usr/share/doc/app \
     && useradd -m -u 1000 app
 
-# Copy binary from builder
 COPY --from=builder /build/target/release/${BINARY_NAME} /usr/local/bin/app
+COPY --from=builder /build/${BINARY_NAME}-sbom.json /usr/share/doc/app/sbom.cdx.json
 
-# Set ownership
-RUN chown app:app /usr/local/bin/app
+RUN chown -R app:app /usr/local/bin/app /usr/share/doc/app
 
-# Switch to non-root user
 USER app
 WORKDIR /home/app
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/app", "--version"]
 
-# Use tini as init
 ENTRYPOINT ["/usr/bin/tini", "--"]
-
-# Default command
 CMD ["/usr/local/bin/app"]

@@ -1,11 +1,12 @@
 [package]
 name = "rust-cicd-template"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-rust-version = "1.92.0"
+rust-version = "1.94.0"
 description = "ThreatFlux Rust CI/CD Template - Best practices for Rust projects"
 license = "MIT"
-repository = "https://github.com/threatflux/rust-cicd-template"
+repository = "https://github.com/ThreatFlux/rust-cicd-template"
+homepage = "https://github.com/ThreatFlux/rust-cicd-template"
 keywords = ["ci", "cd", "template", "github-actions"]
 categories = ["development-tools"]
 

@@ -1,31 +1,34 @@
-# Generated files
 /target/
+
 # Note: Cargo.lock IS committed for applications (reproducible builds)
 # Uncomment below for library-only crates:
 # Cargo.lock
 
-# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
-# Coverage
 lcov.info
 *.profraw
 *.profdata
+sbom/
+dist/
 
-# Build artifacts
 *.o
 *.so
 *.dylib
 *.dll
+*.tar.gz
+*.tar.gz.sha256
+*.zip
+*.sarif
 
-# OS
 .DS_Store
 Thumbs.db
 
-# Environment
 .env
 .env.local
+
+__pycache__/

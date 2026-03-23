@@ -1,64 +1,54 @@
-# ThreatFlux Dependabot Configuration
-# Automated dependency updates
-# Version: 1.0.0
-
 version: 2
 updates:
-  # Rust dependencies
-  - package-ecosystem: "cargo"
-    directory: "/"
+  - package-ecosystem: cargo
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "06:00"
-      timezone: "UTC"
+      timezone: UTC
     open-pull-requests-limit: 10
     groups:
-      # Group minor and patch updates
       rust-minor-patch:
         patterns:
           - "*"
         update-types:
-          - "minor"
-          - "patch"
+          - minor
+          - patch
     labels:
-      - "dependencies"
-      - "rust"
+      - dependencies
+      - rust
     commit-message:
       prefix: "chore(deps)"
-    reviewers:
-      - "threatflux/maintainers"
 
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "06:00"
-      timezone: "UTC"
+      timezone: UTC
     open-pull-requests-limit: 5
     groups:
       github-actions:
         patterns:
           - "*"
     labels:
-      - "dependencies"
-      - "github-actions"
+      - dependencies
+      - github-actions
     commit-message:
       prefix: "chore(ci)"
 
-  # Docker (if Dockerfile exists)
-  - package-ecosystem: "docker"
-    directory: "/"
+  - package-ecosystem: docker
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "06:00"
-      timezone: "UTC"
+      timezone: UTC
     open-pull-requests-limit: 3
     labels:
-      - "dependencies"
-      - "docker"
+      - dependencies
+      - docker
     commit-message:
       prefix: "chore(docker)"
