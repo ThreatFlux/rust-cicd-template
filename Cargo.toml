@@ -1,6 +1,6 @@
 [package]
 name = "rust-cicd-template"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.94.0"
 description = "ThreatFlux Rust CI/CD Template - Best practices for Rust projects"
