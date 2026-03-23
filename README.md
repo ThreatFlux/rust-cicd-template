@@ -1,6 +1,6 @@
 # ThreatFlux Rust CI/CD Template
 
-Standardized CI/CD templates for Rust applications and workspaces. Uses **Rust 1.94.0** as the maintained baseline and is designed to be copied into either a single-crate project or a workspace with an explicit CLI package.
+Standardized CI/CD templates for Rust applications and workspaces. Uses **Rust 1.94.0** as the maintained baseline, defaults new projects to **Rust 2024 edition**, and is designed to be copied into either a single-crate project or a workspace with an explicit CLI package.
 
 ## What This Template Includes
 
