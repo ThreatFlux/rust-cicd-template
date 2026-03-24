@@ -22,13 +22,15 @@ SKIP_DIRS = {
 SKIP_FILES = {
     "README_TEMPLATE.md",
     "docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md",
+    "docs/FAQ.md",
+    "docs/README_STANDARDS.md",
     "scripts/check_template_placeholders.py",
 }
 
 DOWNSTREAM_BLOCKERS = (
     (
         Path("README.md"),
-        "# ThreatFlux Rust CI/CD Template",
+        "# ThreatFlux Rust Project Template",
         "README.md still contains the template repository README; promote and customize README_TEMPLATE.md",
     ),
 )
