@@ -9,10 +9,12 @@ Run this checklist immediately after generating a new repository from the templa
    - `PROJECT_DESCRIPTION`
    - `YOUR_USERNAME`
    - `PROJECT_REPOSITORY`
-2. Update `.github/CODEOWNERS`.
-3. Update `README.md`, `Cargo.toml`, and package metadata.
-4. Update `SECURITY.md` advisory links if the repository is not under ThreatFlux.
-5. Run `make template-check`.
+   - `TEMPLATE_GITHUB_OWNER`
+2. Replace `README.md` with `README_TEMPLATE.md`, then remove `README_TEMPLATE.md`.
+3. Update `.github/CODEOWNERS`.
+4. Update `Cargo.toml`, package metadata, and any inherited org-specific defaults.
+5. Update `SECURITY.md` advisory links if the repository is not under ThreatFlux.
+6. Run `make template-check`.
 
 ## Single-Crate Projects
 
@@ -35,6 +37,16 @@ Recommended values:
 - `RUST_TEMPLATE_BINARY_PACKAGE`: the package that owns that binary
 - `RUST_TEMPLATE_SBOM_MANIFEST_PATH`: the manifest used for SBOM generation
 - `RUST_TEMPLATE_PUBLISH_PACKAGES`: publish order, space separated
+
+Runner defaults:
+
+- CI, security, docker, auto-release, and release workflows use GitHub-hosted runners out of the box.
+- Only set runner repository variables if you need custom labels:
+- `RUST_TEMPLATE_RUNNER_UBUNTU`
+- `RUST_TEMPLATE_RUNNER_MACOS`
+- `RUST_TEMPLATE_RUNNER_WINDOWS`
+- `RUST_TEMPLATE_RUNNER_MACOS_ARM64`
+- `RUST_TEMPLATE_RUNNER_MACOS_X64`
 
 ## Validation
 

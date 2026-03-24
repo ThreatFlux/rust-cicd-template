@@ -9,6 +9,9 @@ PLACEHOLDERS = {
     "PROJECT_DESCRIPTION",
     "YOUR_USERNAME",
     "PROJECT_REPOSITORY",
+    "TEMPLATE_GITHUB_OWNER",
+    "BRIEF_VALUE_PROPOSITION",
+    "REPLACE_WITH_REAL_API",
 }
 
 SKIP_DIRS = {
@@ -22,9 +25,49 @@ SKIP_FILES = {
     "scripts/check_template_placeholders.py",
 }
 
+DOWNSTREAM_BLOCKERS = (
+    (
+        Path("README.md"),
+        "# ThreatFlux Rust CI/CD Template",
+        "README.md still contains the template repository README; promote and customize README_TEMPLATE.md",
+    ),
+)
+
+
+def is_canonical_template_repo() -> bool:
+    cargo_toml = Path("Cargo.toml")
+    if not cargo_toml.exists():
+        return False
+    try:
+        content = cargo_toml.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return False
+    return (
+        'name = "rust-cicd-template"' in content
+        and "ThreatFlux/rust-cicd-template" in content
+    )
+
 
 def main() -> int:
     matches = []
+    blockers = []
+    canonical_template_repo = is_canonical_template_repo()
+
+    if not canonical_template_repo and Path("README_TEMPLATE.md").exists():
+        blockers.append(
+            "README_TEMPLATE.md is still present; copy its contents into README.md, customize it, and remove README_TEMPLATE.md"
+        )
+
+    if not canonical_template_repo:
+        for path, marker, message in DOWNSTREAM_BLOCKERS:
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    continue
+                if marker in content:
+                    blockers.append(message)
+
     for path in Path(".").rglob("*"):
         if not path.is_file():
             continue
@@ -32,6 +75,8 @@ def main() -> int:
             continue
         rel = path.as_posix()
         if rel in SKIP_FILES:
+            continue
+        if canonical_template_repo and rel == ".github/CODEOWNERS":
             continue
         try:
             content = path.read_text(encoding="utf-8")
@@ -41,10 +86,15 @@ def main() -> int:
             if placeholder in content:
                 matches.append((rel, placeholder))
 
-    if matches:
-        print("Unresolved template placeholders found:")
-        for rel, placeholder in matches:
-            print(f"  {rel}: {placeholder}")
+    if blockers or matches:
+        if blockers:
+            print("Repository bootstrap issues found:")
+            for blocker in blockers:
+                print(f"  - {blocker}")
+        if matches:
+            print("Unresolved template placeholders found:")
+            for rel, placeholder in matches:
+                print(f"  {rel}: {placeholder}")
         return 1
 
     return 0

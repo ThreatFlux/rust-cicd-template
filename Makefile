@@ -7,7 +7,8 @@ RUST_TOOLCHAIN ?= stable
 
 DOCKER_IMAGE ?= $(shell basename $(CURDIR))
 DOCKER_TAG ?= latest
-DOCKER_REGISTRY ?= ghcr.io/threatflux
+GITHUB_OWNER ?= $(shell git config --get remote.origin.url | sed -E 's#(git@github.com:|https://github.com/)##; s#/.+##' | tr '[:upper:]' '[:lower:]')
+DOCKER_REGISTRY ?= ghcr.io/$(if $(GITHUB_OWNER),$(GITHUB_OWNER),local)
 BINARY_NAME ?= rust-cicd-template
 BINARY_PACKAGE ?=
 SBOM_MANIFEST_PATH ?= Cargo.toml

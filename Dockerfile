@@ -9,6 +9,10 @@ ARG VCS_REF=unknown
 ARG BINARY_NAME=rust-cicd-template
 ARG BINARY_PACKAGE=
 ARG SBOM_MANIFEST_PATH=Cargo.toml
+ARG OCI_IMAGE_TITLE=Rust Application
+ARG OCI_IMAGE_DESCRIPTION=Rust Application
+ARG OCI_IMAGE_VENDOR=
+ARG OCI_IMAGE_SOURCE=https://github.com
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -42,14 +46,18 @@ ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG BINARY_NAME=rust-cicd-template
+ARG OCI_IMAGE_TITLE=Rust Application
+ARG OCI_IMAGE_DESCRIPTION=Rust Application
+ARG OCI_IMAGE_VENDOR=
+ARG OCI_IMAGE_SOURCE=https://github.com
 
-LABEL org.opencontainers.image.title="ThreatFlux Application" \
-      org.opencontainers.image.description="ThreatFlux Rust Application" \
+LABEL org.opencontainers.image.title="${OCI_IMAGE_TITLE}" \
+      org.opencontainers.image.description="${OCI_IMAGE_DESCRIPTION}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.vendor="ThreatFlux" \
-      org.opencontainers.image.source="https://github.com/ThreatFlux"
+      org.opencontainers.image.vendor="${OCI_IMAGE_VENDOR}" \
+      org.opencontainers.image.source="${OCI_IMAGE_SOURCE}"
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -66,9 +74,6 @@ RUN chown -R app:app /usr/local/bin/app /usr/share/doc/app
 
 USER app
 WORKDIR /home/app
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/app", "--version"]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/app"]
