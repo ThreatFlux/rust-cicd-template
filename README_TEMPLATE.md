@@ -9,13 +9,13 @@
 
 > PROJECT_DESCRIPTION
 
-`PROJECT_NAME` is a Rust project generated from the ThreatFlux CI/CD template. Replace all placeholders before the first merge by running `make template-check`.
+`PROJECT_NAME` provides BRIEF_VALUE_PROPOSITION. Replace every placeholder in this file, `Cargo.toml`, and `.github/CODEOWNERS`, remove `README_TEMPLATE.md`, then run `make template-check` before the first merge.
 
 ## Features
 
-- Clear value proposition
-- Main public capabilities
-- Operational and integration highlights
+- Primary capability with clear user impact
+- Security, reliability, or performance property that matters in production
+- Integration or operational feature relevant to real deployments
 
 ## Installation
 
@@ -27,6 +27,8 @@ PROJECT_NAME = "0.1.0"
 ```
 
 ### Feature Flags
+
+Keep this section only if the crate actually ships optional features.
 
 ```toml
 [dependencies]
@@ -40,9 +42,14 @@ PROJECT_NAME = { version = "0.1.0", features = ["feature1", "feature2"] }
 
 ## Quick Start
 
+The example below should be copy-paste runnable against the generated crate API before the repository is merged.
+
 ```rust
+use PROJECT_NAME::REPLACE_WITH_REAL_API;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Replace with a real runnable example.
+    let output = REPLACE_WITH_REAL_API("example input")?;
+    println!("{output}");
     Ok(())
 }
 ```
@@ -51,15 +58,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Basic Usage
 
-Document one common path that a user can paste and run quickly.
+Document the one path a new user is most likely to need first. Prefer a complete example over prose.
 
 ### Advanced Usage
 
-Document one advanced or production-oriented path.
+Document one production-oriented path such as configuration, deployment, or operational integration.
 
 ## API Reference
 
-Full API documentation is available at [docs.rs](https://docs.rs/PROJECT_NAME).
+Full API documentation is available at [docs.rs](https://docs.rs/PROJECT_NAME). If this repository is primarily a CLI or service, replace this section with the command or API documentation users should reach first.
 
 ## Configuration
 
@@ -72,12 +79,12 @@ Full API documentation is available at [docs.rs](https://docs.rs/PROJECT_NAME).
 ### Prerequisites
 
 - Rust 1.94.0 or later
-- Additional dependencies if any
+- Additional system dependencies if any
 
 ### Building
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/PROJECT_NAME.git
+git clone git@github.com:ThreatFlux/PROJECT_NAME.git
 cd PROJECT_NAME
 
 make dev-setup
@@ -85,6 +92,8 @@ make build
 make test
 make ci
 ```
+
+If the repository is not under `ThreatFlux`, replace the SSH remote with the correct owner before merge.
 
 ### Makefile Targets
 
@@ -100,20 +109,20 @@ make coverage      # Generate coverage report
 
 ## Contributing
 
-Contributions are welcome! Please see our [Contributing Guidelines](CONTRIBUTING.md).
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feat/amazing-feature`)
-3. Commit your changes using [conventional commits](https://www.conventionalcommits.org/)
-4. Push to the branch (`git push origin feat/amazing-feature`)
-5. Open a Pull Request
+1. Fork the repository.
+2. Create your feature branch: `git checkout -b feat/amazing-feature`
+3. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/)
+4. Push to the branch: `git push origin feat/amazing-feature`
+5. Open a Pull Request.
 
 ## Security
 
-Please see our [Security Policy](SECURITY.md) for reporting vulnerabilities.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting instructions.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 Generated from the [ThreatFlux Rust CI/CD template](https://github.com/ThreatFlux/rust-cicd-template).

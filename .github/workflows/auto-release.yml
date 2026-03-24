@@ -34,7 +34,7 @@ env:
 jobs:
   check:
     name: Check for Release
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
@@ -83,7 +83,9 @@ jobs:
           CHANGES=$(git log $LAST_TAG..HEAD --oneline --no-merges | wc -l)
           FEAT_COUNT=$(git log $LAST_TAG..HEAD --grep="^feat" --oneline | wc -l)
           FIX_COUNT=$(git log $LAST_TAG..HEAD --grep="^fix" --oneline | wc -l)
-          BREAKING_COUNT=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
+          BREAKING_BODY_COUNT=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
+          BREAKING_SUBJECT_COUNT=$(git log $LAST_TAG..HEAD --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
+          BREAKING_COUNT=$((BREAKING_BODY_COUNT + BREAKING_SUBJECT_COUNT))
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "should_release=true" >> "$GITHUB_OUTPUT"
@@ -101,7 +103,7 @@ jobs:
         id: version
         if: steps.check.outputs.should_release == 'true'
         run: |
-          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CURRENT_VERSION="$(python3 scripts/release_version.py current)"
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 
@@ -110,10 +112,12 @@ jobs:
           else
             LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
             if [ -z "$LAST_TAG" ]; then
-              LAST_TAG=$(git rev-list --max-parents=0 HEAD)
-            fi
+            LAST_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
 
-            BREAKING=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
+            BREAKING_BODY=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
+            BREAKING_SUBJECT=$(git log $LAST_TAG..HEAD --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
+            BREAKING=$((BREAKING_BODY + BREAKING_SUBJECT))
             FEAT=$(git log $LAST_TAG..HEAD --grep="^feat" --oneline | wc -l)
 
             if [[ $BREAKING -gt 0 ]]; then
@@ -137,7 +141,7 @@ jobs:
     name: Create Release
     needs: check
     if: needs.check.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -159,20 +163,8 @@ jobs:
       - name: Update version
         run: |
           VERSION="${{ needs.check.outputs.next_version }}"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          import re
-
-          path = Path("Cargo.toml")
-          version = os.environ["VERSION"]
-          content = path.read_text()
-          updated, replacements = re.subn(r'(?m)^version = ".*"$', f'version = "{version}"', content, count=1)
-          if replacements != 1:
-              raise SystemExit("failed to update Cargo.toml version")
-          path.write_text(updated)
-          PY
-          cargo check 2>/dev/null || true
+          python3 scripts/release_version.py set "$VERSION"
+          cargo check --workspace --all-features 2>/dev/null || true
         env:
           VERSION: ${{ needs.check.outputs.next_version }}
 
@@ -212,7 +204,10 @@ jobs:
             exit 0
           fi
 
-          git add Cargo.toml Cargo.lock
+          find . -name Cargo.toml -not -path './target/*' -not -path './.git/*' -print0 | xargs -0 git add
+          if [[ -f Cargo.lock ]]; then
+            git add Cargo.lock
+          fi
           git commit -m "chore: release v$VERSION"
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin HEAD:main

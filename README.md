@@ -20,7 +20,7 @@ Standardized CI/CD templates for Rust applications and workspaces. Uses **Rust 1
 gh repo create my-project --template ThreatFlux/rust-cicd-template
 cd my-project
 
-# Replace template placeholders and repo defaults first.
+# Replace template placeholders and repo defaults first, then verify.
 make template-check
 
 # Install local tooling and run CI locally.
@@ -36,6 +36,8 @@ cp -r .github docs scripts .cargo \
   .editorconfig .pre-commit-config.yaml clippy.toml rustfmt.toml rust-toolchain.toml \
   /path/to/your/project/
 ```
+
+When you generate a repository from this template, replace `README.md` with `README_TEMPLATE.md` immediately, then remove `README_TEMPLATE.md`. `make template-check` now fails until that handoff is completed.
 
 ## Single Crate vs Workspace
 
@@ -73,6 +75,7 @@ Before merging a generated repo, replace:
 - example usernames and repository URLs
 - default code owners
 - contact emails if they differ from ThreatFlux defaults
+- any placeholder SSH clone examples with the final repository path
 
 Use:
 
@@ -99,11 +102,22 @@ Release and packaging behavior can be overridden with:
 - `SBOM_MANIFEST_PATH`
 - `PUBLISH_PACKAGES`
 
+Docker image defaults:
+- `DOCKER_REGISTRY` auto-derives from the GitHub remote owner when possible
+- OCI image labels are neutral by default and can be overridden with Docker build args
+
 Equivalent GitHub repository variables:
 - `RUST_TEMPLATE_BINARY_NAME`
 - `RUST_TEMPLATE_BINARY_PACKAGE`
 - `RUST_TEMPLATE_SBOM_MANIFEST_PATH`
 - `RUST_TEMPLATE_PUBLISH_PACKAGES`
+
+Runner selection defaults to GitHub-hosted runners. Only set these repository variables if you need custom labels:
+- `RUST_TEMPLATE_RUNNER_UBUNTU`
+- `RUST_TEMPLATE_RUNNER_MACOS`
+- `RUST_TEMPLATE_RUNNER_WINDOWS`
+- `RUST_TEMPLATE_RUNNER_MACOS_ARM64`
+- `RUST_TEMPLATE_RUNNER_MACOS_X64`
 
 ## Required Secrets
 
