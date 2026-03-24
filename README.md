@@ -29,7 +29,7 @@ A batteries-included template that encodes best practices for building, testing,
 - [Configuration Reference](#configuration-reference)
 - [Required Secrets](#required-secrets)
 - [Makefile Targets](#makefile-targets)
-- [Documentation Standards](#documentation-standards)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
@@ -290,9 +290,21 @@ make clean            # Remove build artifacts
 
 <p align="right"><a href="#table-of-contents">back to top</a></p>
 
-## Documentation Standards
+## Documentation
 
-README guidance for generated projects lives in [docs/README_STANDARDS.md](docs/README_STANDARDS.md). The starter README for new projects lives in [README_TEMPLATE.md](README_TEMPLATE.md).
+This template ships a complete `docs/` directory that generated projects should adopt. Each document includes a comment block at the top explaining what makes a good version of that file.
+
+| Document | Purpose |
+|----------|---------|
+| [docs/README.md](docs/README.md) | Documentation index and naming conventions |
+| [docs/README_STANDARDS.md](docs/README_STANDARDS.md) | README style guide — badges, TOC, diagrams, anti-patterns |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | High-level codemap and design decisions |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Version history (Keep a Changelog format) |
+| [docs/RELEASING.md](docs/RELEASING.md) | Maintainer release runbook |
+| [docs/FAQ.md](docs/FAQ.md) | Common setup and customization questions |
+| [docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md](docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md) | Post-generation setup checklist |
+
+The starter README for generated projects lives in [README_TEMPLATE.md](README_TEMPLATE.md).
 
 <p align="right"><a href="#table-of-contents">back to top</a></p>
 
