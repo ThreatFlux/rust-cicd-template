@@ -15,9 +15,6 @@ updates:
         update-types:
           - minor
           - patch
-    labels:
-      - dependencies
-      - rust
     commit-message:
       prefix: "chore(deps)"
 
@@ -33,9 +30,6 @@ updates:
       github-actions:
         patterns:
           - "*"
-    labels:
-      - dependencies
-      - github-actions
     commit-message:
       prefix: "chore(ci)"
 
@@ -47,8 +41,5 @@ updates:
       time: "06:00"
       timezone: UTC
     open-pull-requests-limit: 3
-    labels:
-      - dependencies
-      - docker
     commit-message:
       prefix: "chore(docker)"
