@@ -20,11 +20,10 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -u 1000 builder
-USER builder
+USER root
 WORKDIR /build
 
-COPY --chown=builder:builder . .
+COPY . .
 
 RUN if [ -n "${BINARY_PACKAGE}" ]; then \
       cargo build --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features; \
