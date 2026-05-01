@@ -21,6 +21,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  DOCKERHUB_REGISTRY: docker.io
+  DOCKERHUB_NAMESPACE: ${{ vars.RUST_TEMPLATE_DOCKERHUB_NAMESPACE || 'threatflux' }}
   DOCKER_BUILDKIT: 1
   BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
   BINARY_PACKAGE: ${{ vars.RUST_TEMPLATE_BINARY_PACKAGE || '' }}
@@ -44,6 +46,18 @@ jobs:
       - name: Lowercase image name
         id: lowercase
         run: echo "image_name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Lowercase repo name
+        id: dockerhub_repo
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          echo "name=${REPO_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect Rust toolchain version
+        id: rust_toolchain
+        run: |
+          TOOLCHAIN_VERSION="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*\"\\(.*\\)\"/\\1/p' rust-toolchain.toml | sed -n '1p')"
+          echo "version=${TOOLCHAIN_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Select build platforms
         id: platforms
@@ -71,11 +85,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
+          images: |
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
+            ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/${{ steps.dockerhub_repo.outputs.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -83,6 +107,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=
+            type=raw,value=base-rust-${{ steps.rust_toolchain.outputs.version }}
+            type=raw,value=base-rust-latest,enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and export (PRs)
