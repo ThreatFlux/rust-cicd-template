@@ -11,7 +11,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.94.0
+  RUST_VERSION: 1.95.0
   BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
   SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
 
