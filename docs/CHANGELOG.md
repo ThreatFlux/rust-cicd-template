@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md
 - README_TEMPLATE.md starter for generated projects
 - Bootstrap checklist and README standards documentation
-- Rust 2024 edition default with 1.94.0 MSRV baseline
+- Rust 2024 edition default with 1.95.0 MSRV baseline
 
 [Unreleased]: https://github.com/ThreatFlux/rust-cicd-template/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/ThreatFlux/rust-cicd-template/releases/tag/v0.5.0
