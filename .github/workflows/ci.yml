@@ -177,7 +177,7 @@ jobs:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        uses: taiki-e/install-action@fa0dd4cd0a40696e6f9766370614a5ce482e6aa8 # v2.77.5
         with:
           tool: cargo-hack
 
