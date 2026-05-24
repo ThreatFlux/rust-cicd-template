@@ -115,12 +115,12 @@ jobs:
             type=raw,value=base-rust-${{ steps.rust_toolchain.outputs.version }}
             type=raw,value=base-rust-latest,enable={{is_default_branch}}
 
-      - name: Build base image (builder stage)
+      - name: Build base image
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
-          target: builder
+          target: rust-base
           platforms: ${{ steps.platforms.outputs.value }}
           push: true
           tags: ${{ steps.base_meta.outputs.tags }}
@@ -218,7 +218,7 @@ jobs:
         run: docker pull ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
 
       - name: Run Trivy scanner
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', needs.build.outputs.image_name) || format('{0}/{1}:{2}', env.REGISTRY, needs.build.outputs.image_name, steps.sha.outputs.short) }}
           format: sarif

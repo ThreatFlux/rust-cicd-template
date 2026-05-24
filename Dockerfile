@@ -1,7 +1,7 @@
 # ThreatFlux Rust Dockerfile
 # Multi-stage build for single-crate or workspace-based applications.
 
-FROM rust:1.95.0-bookworm AS builder
+FROM rust:1.95.0-bookworm AS rust-base
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
@@ -20,10 +20,13 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-USER root
+FROM rust-base AS builder
+
+RUN useradd -m -u 1000 builder
+USER builder
 WORKDIR /build
 
-COPY . .
+COPY --chown=builder:builder . .
 
 RUN if [ -n "${BINARY_PACKAGE}" ]; then \
       cargo build --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features; \
