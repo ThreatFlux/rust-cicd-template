@@ -4,7 +4,7 @@ name = "rust-cicd-template"
 version = "0.5.0"
 
 edition = "2024"
-rust-version = "1.95.0"
+rust-version = "1.96.0"
 description = "Production-ready Rust project template with CI/CD, security, packaging, and governance best practices"
 license = "MIT"
 repository = "https://github.com/ThreatFlux/rust-cicd-template"

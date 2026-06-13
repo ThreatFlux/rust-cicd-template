@@ -25,7 +25,7 @@ Place CI/status badges first (what users need most), then metadata badges:
 [![Crates.io](https://img.shields.io/crates/v/PROJECT.svg)](https://crates.io/crates/PROJECT)
 [![Documentation](https://docs.rs/PROJECT/badge.svg)](https://docs.rs/PROJECT)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.95.0%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
 ```
 
 Additional badges to consider:

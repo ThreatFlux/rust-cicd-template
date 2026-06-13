@@ -73,7 +73,7 @@ The `docker.yml` workflow also triggers on the tag, producing:
 | Sign | Cosign image signature |
 | SBOM | CycloneDX image SBOM |
 | Push | `ghcr.io/threatflux/<image>:<tag>` |
-| Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.95.0`, `ghcr.io/threatflux/rust-cicd-template:base-rust-latest` |
+| Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.96.0`, `ghcr.io/threatflux/rust-cicd-template:base-rust-latest` |
 
 ### Required Permissions
 
