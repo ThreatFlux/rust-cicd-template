@@ -5,7 +5,7 @@
 [![CI](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/ci.yml/badge.svg)](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/ci.yml)
 [![Security](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/security.yml/badge.svg)](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.95.0%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
 [![GitHub release](https://img.shields.io/github/v/release/ThreatFlux/rust-cicd-template)](https://github.com/ThreatFlux/rust-cicd-template/releases)
 
 **Production-ready scaffolding for Rust projects — CI/CD, security, packaging, and governance out of the box.**
@@ -16,7 +16,7 @@
 
 ---
 
-A batteries-included template that encodes best practices for building, testing, securing, and shipping Rust applications. Uses **Rust 1.95.0** as the maintained baseline, defaults to the **Rust 2024 edition**, and supports both single-crate projects and multi-crate workspaces.
+A batteries-included template that encodes best practices for building, testing, securing, and shipping Rust applications. Uses **Rust 1.96.0** as the maintained baseline, defaults to the **Rust 2024 edition**, and supports both single-crate projects and multi-crate workspaces.
 
 ## Table of Contents
 
@@ -222,9 +222,11 @@ The minimum supported Rust version is declared in these files and must stay in s
 | `Cargo.toml` | `rust-version` |
 | `rust-toolchain.toml` | `channel` |
 | `Makefile` | `RUST_MSRV` |
+| `clippy.toml` | `msrv` |
 | `.github/workflows/ci.yml` | `RUST_STABLE_VERSION` |
 | `.github/workflows/release.yml` | `RUST_VERSION` |
 | `.github/workflows/security.yml` | `RUST_VERSION` |
+| `.github/workflows/auto-release.yml` | `RUST_VERSION` |
 | `Dockerfile` | `FROM rust:` tag |
 
 ### Makefile Overrides

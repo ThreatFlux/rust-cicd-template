@@ -51,14 +51,16 @@ Replace every match, then re-run `make template-check`.
 
 ### How do I change the MSRV?
 
-The minimum supported Rust version is declared in seven places. Update all of them:
+The minimum supported Rust version is declared in nine places. Update all of them:
 
 - `Cargo.toml` → `rust-version`
 - `rust-toolchain.toml` → `channel`
 - `Makefile` → `RUST_MSRV`
+- `clippy.toml` → `msrv`
 - `.github/workflows/ci.yml` → MSRV job matrix
 - `.github/workflows/release.yml` → build toolchain
 - `.github/workflows/security.yml` → toolchain pin
+- `.github/workflows/auto-release.yml` → release automation toolchain
 - `Dockerfile` → `FROM rust:` tag
 
 See the [Configuration Reference](../README.md#configuration-reference) for details.
