@@ -1,7 +1,7 @@
 # ThreatFlux Rust Dockerfile
 # Multi-stage build for single-crate or workspace-based applications.
 
-FROM rust:1.96.0-bookworm AS rust-base
+FROM rust:1.96.1-bookworm AS rust-base
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
