@@ -33,6 +33,9 @@ fn usage() -> String {
 }
 
 fn main() -> ExitCode {
+    // Only post-argv[0] values select ordinary CLI output; no authorization or
+    // other security decision depends on process arguments.
+    // nosemgrep: rust.lang.security.args.args
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match args.first().map(String::as_str) {

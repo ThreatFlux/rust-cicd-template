@@ -255,7 +255,9 @@ variable, never by editing the Dockerfile. A CI conformance job diffs each repo'
 against this one; a fork will fail it.
 
 The runtime is distroless (`gcr.io/distroless/cc-debian12:nonroot`, uid 65532, no shell or
-package manager), all base images are digest-pinned, and Dependabot keeps the digests fresh.
+package manager), and all base images are digest-pinned. Dependabot refreshes each
+Dockerfile's first `FROM` (the Rust builder); maintainers refresh the later runtime digest
+with the `docker buildx imagetools inspect` command documented in the Dockerfiles.
 
 | Repository variable | Default | Purpose |
 |---------------------|---------|---------|
@@ -264,6 +266,7 @@ package manager), all base images are digest-pinned, and Dependabot keeps the di
 | `RUST_TEMPLATE_CLI_NAME` | binary name | Friendly name symlinked next to `/usr/local/bin/app` |
 | `RUST_TEMPLATE_SBOM_MANIFEST_PATH` | `Cargo.toml` | Manifest handed to cargo-cyclonedx |
 | `RUST_TEMPLATE_EXTRA_BUILD_PACKAGES` | _(empty)_ | Extra apt packages needed to **compile**, e.g. `clang lld` |
+| `RUST_TEMPLATE_EXTRA_RUNTIME_PACKAGES` | _(empty)_ | Extra apt packages needed at **runtime**; only honoured by `Dockerfile.debian` |
 | `RUST_TEMPLATE_APP_PORT` | `8080` | `EXPOSE` metadata |
 | `RUST_TEMPLATE_DOCKERFILE` | `Dockerfile` | Set to `Dockerfile.debian` to opt into the shell variant |
 

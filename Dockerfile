@@ -14,7 +14,8 @@
 #
 # Base images are pinned by digest for reproducibility (Scorecard Pinned-Dependencies).
 # Refresh with: docker buildx imagetools inspect <image> | awk '/^Digest:/{print $2}'
-# Digests are kept current automatically by .github/dependabot.yml.
+# Dependabot refreshes the first FROM (the Rust builder); maintainers refresh
+# the later runtime digest with the command above during template updates.
 
 FROM rust:1.97.0-bookworm@sha256:8fa55b2f3ddf97471ab6a767bfa3f37e6bad0986ba823e75fea57e2a2a5c3073 AS rust-base
 
@@ -35,7 +36,10 @@ ARG OCI_IMAGE_VENDOR=ThreatFlux
 ARG OCI_IMAGE_SOURCE=https://github.com
 
 # tini is installed here so the runtime stage can copy it out: distroless ships
-# no init, and PID 1 must reap zombies and forward signals.
+# no init, and PID 1 must reap zombies and forward signals. Exact Debian package
+# revisions are intentionally not pinned because this cross-repo template accepts
+# arbitrary EXTRA_BUILD_PACKAGES and follows the repositories in its pinned base.
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     pkg-config \

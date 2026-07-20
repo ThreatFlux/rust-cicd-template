@@ -33,10 +33,10 @@ updates:
     commit-message:
       prefix: "chore(ci)"
 
-  # Covers both Dockerfile (distroless) and Dockerfile.debian in the repo root.
-  # Base images are pinned by tag@sha256 digest; Dependabot refreshes the digest
-  # as well as the tag. This is REQUIRED, not optional — digest pinning without
-  # automated bumps silently converts a freshness problem into a stale-CVE one.
+  # Covers the first FROM in Dockerfile and Dockerfile.debian: their shared Rust
+  # builder image. GitHub's Docker updater does not support later FROM lines, so
+  # maintainers refresh the separately pinned runtime images with the
+  # `docker buildx imagetools inspect` command documented in each Dockerfile.
   - package-ecosystem: docker
     directory: /
     schedule:

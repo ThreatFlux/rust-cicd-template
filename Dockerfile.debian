@@ -31,6 +31,9 @@ ARG OCI_IMAGE_DESCRIPTION=Rust Application
 ARG OCI_IMAGE_VENDOR=ThreatFlux
 ARG OCI_IMAGE_SOURCE=https://github.com
 
+# Exact Debian package revisions are intentionally not pinned because this
+# cross-repo template accepts arbitrary EXTRA_BUILD_PACKAGES.
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     pkg-config \
@@ -102,6 +105,9 @@ LABEL org.opencontainers.image.title="${OCI_IMAGE_TITLE}" \
       org.opencontainers.image.documentation="${OCI_IMAGE_DOCUMENTATION}" \
       com.threatflux.runtime.variant="debian"
 
+# Exact Debian package revisions are intentionally not pinned because this
+# sanctioned escape hatch accepts arbitrary EXTRA_RUNTIME_PACKAGES.
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
