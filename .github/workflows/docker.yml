@@ -10,6 +10,7 @@ on:
     paths:
       - ".github/workflows/docker.yml"
       - "Dockerfile"
+      - "Dockerfile.debian"
       - ".dockerignore"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -27,6 +28,18 @@ env:
   BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
   BINARY_PACKAGE: ${{ vars.RUST_TEMPLATE_BINARY_PACKAGE || '' }}
   SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
+  # Friendly CLI name symlinked alongside the fixed /usr/local/bin/app entrypoint.
+  CLI_NAME: ${{ vars.RUST_TEMPLATE_CLI_NAME || vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
+  # Space-separated extra apt packages needed to compile (e.g. "clang lld").
+  EXTRA_BUILD_PACKAGES: ${{ vars.RUST_TEMPLATE_EXTRA_BUILD_PACKAGES || '' }}
+  # Extra apt packages needed at runtime. Only honoured by Dockerfile.debian —
+  # the distroless default has no package manager and ignores this.
+  EXTRA_RUNTIME_PACKAGES: ${{ vars.RUST_TEMPLATE_EXTRA_RUNTIME_PACKAGES || '' }}
+  # Advertised listening port (EXPOSE metadata only).
+  APP_PORT: ${{ vars.RUST_TEMPLATE_APP_PORT || '8080' }}
+  # Which Dockerfile to build: the distroless default, or the sanctioned
+  # Dockerfile.debian variant for repos that need a runtime shell.
+  DOCKERFILE: ${{ vars.RUST_TEMPLATE_DOCKERFILE || 'Dockerfile' }}
 
 jobs:
   build:
@@ -122,6 +135,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          file: ./${{ env.DOCKERFILE }}
           target: rust-base
           platforms: ${{ steps.platforms.outputs.value }}
           push: true
@@ -136,12 +150,17 @@ jobs:
             BINARY_NAME=${{ env.BINARY_NAME }}
             BINARY_PACKAGE=${{ env.BINARY_PACKAGE }}
             SBOM_MANIFEST_PATH=${{ env.SBOM_MANIFEST_PATH }}
+            CLI_NAME=${{ env.CLI_NAME }}
+            EXTRA_BUILD_PACKAGES=${{ env.EXTRA_BUILD_PACKAGES }}
+            EXTRA_RUNTIME_PACKAGES=${{ env.EXTRA_RUNTIME_PACKAGES }}
+            APP_PORT=${{ env.APP_PORT }}
 
       - name: Build and export (PRs)
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          file: ./${{ env.DOCKERFILE }}
           platforms: linux/amd64
           tags: ${{ steps.lowercase.outputs.image_name }}:scan
           labels: ${{ steps.meta.outputs.labels }}
@@ -155,6 +174,10 @@ jobs:
             BINARY_NAME=${{ env.BINARY_NAME }}
             BINARY_PACKAGE=${{ env.BINARY_PACKAGE }}
             SBOM_MANIFEST_PATH=${{ env.SBOM_MANIFEST_PATH }}
+            CLI_NAME=${{ env.CLI_NAME }}
+            EXTRA_BUILD_PACKAGES=${{ env.EXTRA_BUILD_PACKAGES }}
+            EXTRA_RUNTIME_PACKAGES=${{ env.EXTRA_RUNTIME_PACKAGES }}
+            APP_PORT=${{ env.APP_PORT }}
 
       - name: Build and push runtime image (non-PR)
         if: github.event_name != 'pull_request'
@@ -162,6 +185,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          file: ./${{ env.DOCKERFILE }}
           platforms: ${{ steps.platforms.outputs.value }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -175,6 +199,10 @@ jobs:
             BINARY_NAME=${{ env.BINARY_NAME }}
             BINARY_PACKAGE=${{ env.BINARY_PACKAGE }}
             SBOM_MANIFEST_PATH=${{ env.SBOM_MANIFEST_PATH }}
+            CLI_NAME=${{ env.CLI_NAME }}
+            EXTRA_BUILD_PACKAGES=${{ env.EXTRA_BUILD_PACKAGES }}
+            EXTRA_RUNTIME_PACKAGES=${{ env.EXTRA_RUNTIME_PACKAGES }}
+            APP_PORT=${{ env.APP_PORT }}
 
       - name: Upload image artifact
         if: github.event_name == 'pull_request'

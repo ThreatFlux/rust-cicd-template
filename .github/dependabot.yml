@@ -33,6 +33,10 @@ updates:
     commit-message:
       prefix: "chore(ci)"
 
+  # Covers both Dockerfile (distroless) and Dockerfile.debian in the repo root.
+  # Base images are pinned by tag@sha256 digest; Dependabot refreshes the digest
+  # as well as the tag. This is REQUIRED, not optional — digest pinning without
+  # automated bumps silently converts a freshness problem into a stale-CVE one.
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -40,6 +44,10 @@ updates:
       day: monday
       time: "06:00"
       timezone: UTC
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 10
+    groups:
+      docker-base-images:
+        patterns:
+          - "*"
     commit-message:
       prefix: "chore(docker)"

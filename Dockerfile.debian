@@ -1,20 +1,20 @@
-# ThreatFlux Rust Dockerfile
-# Canonical multi-stage build for single-crate or workspace-based applications.
+# ThreatFlux Rust Dockerfile — sanctioned debian variant
 #
-# This file is the single source of truth for every ThreatFlux Rust repo that
-# ships a binary. It is intended to be byte-identical across repos: everything
-# repo-specific is a build ARG, supplied by .github/workflows/docker.yml from
-# repository variables. A CI conformance job diffs each repo's copy against this
-# one, so DO NOT fork it — if you need something it cannot express, add an ARG
-# here instead.
+# USE THE DEFAULT `Dockerfile` UNLESS YOU CANNOT.
 #
-# The runtime stage is distroless: no shell, no package manager, no coreutils.
-# If you genuinely need a shell at runtime, use the sanctioned Dockerfile.debian
-# variant rather than editing this file.
+# This variant exists for the two cases distroless genuinely cannot serve:
+#   1. The application shells out at runtime (std::process::Command on sh, git,
+#      external scanners, ...). Distroless has no shell, so those calls fail.
+#   2. The application needs extra runtime OS packages — see EXTRA_RUNTIME_PACKAGES.
+#      The distroless variant has no package manager and cannot install anything.
 #
-# Base images are pinned by digest for reproducibility (Scorecard Pinned-Dependencies).
-# Refresh with: docker buildx imagetools inspect <image> | awk '/^Digest:/{print $2}'
-# Digests are kept current automatically by .github/dependabot.yml.
+# Trade-off you are accepting: a shell, a package manager and coreutils in the
+# final image, and therefore a much larger CVE surface than the default.
+# Adopting this file is a deliberate, reviewable choice — record why in your
+# repo's README so the next audit does not "fix" it back.
+#
+# Build stages are IDENTICAL to Dockerfile; only the runtime stage differs.
+# Keep the two in sync — the conformance job checks both against the template.
 
 FROM rust:1.97.0-bookworm@sha256:8fa55b2f3ddf97471ab6a767bfa3f37e6bad0986ba823e75fea57e2a2a5c3073 AS rust-base
 
@@ -25,17 +25,12 @@ ARG BINARY_NAME=rust-cicd-template
 ARG BINARY_PACKAGE=
 ARG CLI_NAME=rust-cicd-template
 ARG SBOM_MANIFEST_PATH=Cargo.toml
-# Space-separated extra apt packages required to COMPILE, e.g. "clang lld build-essential".
-# Build-time only — the distroless runtime has no package manager, so extra
-# RUNTIME packages are supported exclusively by Dockerfile.debian.
 ARG EXTRA_BUILD_PACKAGES=
 ARG OCI_IMAGE_TITLE=Rust Application
 ARG OCI_IMAGE_DESCRIPTION=Rust Application
 ARG OCI_IMAGE_VENDOR=ThreatFlux
 ARG OCI_IMAGE_SOURCE=https://github.com
 
-# tini is installed here so the runtime stage can copy it out: distroless ships
-# no init, and PID 1 must reap zombies and forward signals.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     pkg-config \
@@ -61,8 +56,6 @@ RUN if [ -n "${BINARY_PACKAGE}" ]; then \
       cargo build --release --bin "${BINARY_NAME}" --all-features || cargo build --release --all-features; \
     fi
 
-# cargo-cyclonedx writes the SBOM beside the manifest it was handed, which in a
-# workspace is not necessarily /build. The find normalizes the output location.
 RUN cargo install cargo-cyclonedx --locked --version 0.5.8 && \
     cargo cyclonedx \
       --manifest-path "${SBOM_MANIFEST_PATH}" \
@@ -72,15 +65,6 @@ RUN cargo install cargo-cyclonedx --locked --version 0.5.8 && \
       --override-filename "${BINARY_NAME}-sbom" && \
     find /build -name "${BINARY_NAME}-sbom.json" -exec cp {} /build/sbom.cdx.json \; -quit
 
-# Stage the runtime filesystem under a fixed layout.
-#
-# The binary is staged as `app` at a FIXED path deliberately: exec-form
-# ENTRYPOINT and HEALTHCHECK do NOT expand build ARGs, so they cannot reference
-# ${CLI_NAME}. A symlink preserves the friendly name for `docker run <img>` and
-# for anyone exec'ing into the Dockerfile.debian variant.
-#
-# Writable directories are created here because the distroless runtime has no
-# shell to mkdir with; ownership is applied on the way in via COPY --chown.
 RUN mkdir -p /home/builder/out/bin /home/builder/out/doc \
              /home/builder/runtime-skel/data \
              /home/builder/runtime-skel/config \
@@ -91,13 +75,15 @@ RUN mkdir -p /home/builder/out/bin /home/builder/out/doc \
     fi && \
     cp /build/sbom.cdx.json /home/builder/out/doc/sbom.cdx.json
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:66aa873a4a14fb164aa01296058efd8253744606d72715e45acface073359faa AS runtime
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS runtime
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
-# Advertised listening port. Metadata only — this does not publish the port.
 ARG APP_PORT=8080
+# Space-separated extra apt packages required at RUNTIME, e.g. "git curl".
+# This is the capability that justifies choosing this variant over the default.
+ARG EXTRA_RUNTIME_PACKAGES=
 ARG OCI_IMAGE_TITLE=Rust Application
 ARG OCI_IMAGE_DESCRIPTION=Rust Application
 ARG OCI_IMAGE_VENDOR=ThreatFlux
@@ -113,9 +99,16 @@ LABEL org.opencontainers.image.title="${OCI_IMAGE_TITLE}" \
       org.opencontainers.image.vendor="${OCI_IMAGE_VENDOR}" \
       org.opencontainers.image.source="${OCI_IMAGE_SOURCE}" \
       org.opencontainers.image.licenses="${OCI_IMAGE_LICENSES}" \
-      org.opencontainers.image.documentation="${OCI_IMAGE_DOCUMENTATION}"
+      org.opencontainers.image.documentation="${OCI_IMAGE_DOCUMENTATION}" \
+      com.threatflux.runtime.variant="debian"
 
-COPY --from=builder /usr/bin/tini /usr/bin/tini
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    tini \
+    ${EXTRA_RUNTIME_PACKAGES} \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 65532 app
 
 COPY --from=builder --chown=65532:65532 /home/builder/out/bin/ /usr/local/bin/
 COPY --from=builder --chown=65532:65532 /home/builder/out/doc/ /usr/share/doc/app/
@@ -128,8 +121,8 @@ WORKDIR /data
 
 ENV RUST_LOG=info
 
-# Exec form (there is no shell in distroless); a nonzero exit means unhealthy.
-# Every ThreatFlux CLI must therefore implement `--version`.
+# Exec form is kept identical to the distroless variant so the two behave the
+# same and can be swapped without touching orchestration.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/app", "--version"]
 
