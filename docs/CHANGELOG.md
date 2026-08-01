@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated README_TEMPLATE.md to inherit all structural best practices
 - Updated Cargo.toml description and keywords
 
+### Maintenance
+
+- Raised the Rust baseline and MSRV to 1.97.1.
+- Refreshed pinned Rust builder/runtime image digests and GitHub Actions.
+- Consolidated the distroless Docker hardening and CLI contract validation.
+
 ## [0.5.0] - 2025-03-24
 
 ### Added

@@ -5,7 +5,7 @@
 [![CI](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/ci.yml/badge.svg)](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/ci.yml)
 [![Security](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/security.yml/badge.svg)](https://github.com/ThreatFlux/rust-cicd-template/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org)
 [![GitHub release](https://img.shields.io/github/v/release/ThreatFlux/rust-cicd-template)](https://github.com/ThreatFlux/rust-cicd-template/releases)
 
 **Production-ready scaffolding for Rust projects — CI/CD, security, packaging, and governance out of the box.**
@@ -16,7 +16,7 @@
 
 ---
 
-A batteries-included template that encodes best practices for building, testing, securing, and shipping Rust applications. Uses **Rust 1.96.0** as the maintained baseline, defaults to the **Rust 2024 edition**, and supports both single-crate projects and multi-crate workspaces.
+A batteries-included template that encodes best practices for building, testing, securing, and shipping Rust applications. Uses **Rust 1.97.1** as the maintained baseline, defaults to the **Rust 2024 edition**, and supports both single-crate projects and multi-crate workspaces.
 
 ## Table of Contents
 
@@ -244,8 +244,51 @@ The minimum supported Rust version is declared in these files and must stay in s
 |---------|----------|
 | `DOCKER_REGISTRY` | Auto-derived from GitHub remote owner |
 | OCI image labels | Neutral defaults; overridable via build args |
-
 | `Base image tags` | Published base image tags: `base-rust-<channel>` and `base-rust-latest` |
+
+### Container Images
+
+`Dockerfile` is the single source of truth for every ThreatFlux Rust repo that ships a
+binary, and is meant to stay **byte-identical across repos**. Everything repo-specific is a
+build ARG supplied by `docker.yml` from repository variables — so customize by setting a
+variable, never by editing the Dockerfile. A CI conformance job diffs each repo's copy
+against this one; a fork will fail it.
+
+The runtime is distroless (`gcr.io/distroless/cc-debian12:nonroot`, uid 65532, no shell or
+package manager), and all base images are digest-pinned. Dependabot refreshes each
+Dockerfile's first `FROM` (the Rust builder); maintainers refresh the later runtime digest
+with the `docker buildx imagetools inspect` command documented in the Dockerfiles.
+
+| Repository variable | Default | Purpose |
+|---------------------|---------|---------|
+| `RUST_TEMPLATE_BINARY_NAME` | repo name | Cargo `--bin` target to build |
+| `RUST_TEMPLATE_BINARY_PACKAGE` | _(empty)_ | Workspace member (`-p`), if any |
+| `RUST_TEMPLATE_CLI_NAME` | binary name | Friendly name symlinked next to `/usr/local/bin/app` |
+| `RUST_TEMPLATE_SBOM_MANIFEST_PATH` | `Cargo.toml` | Manifest handed to cargo-cyclonedx |
+| `RUST_TEMPLATE_EXTRA_BUILD_PACKAGES` | _(empty)_ | Extra apt packages needed to **compile**, e.g. `clang lld` |
+| `RUST_TEMPLATE_EXTRA_RUNTIME_PACKAGES` | _(empty)_ | Extra apt packages needed at **runtime**; only honoured by `Dockerfile.debian` |
+| `RUST_TEMPLATE_APP_PORT` | `8080` | `EXPOSE` metadata |
+| `RUST_TEMPLATE_DOCKERFILE` | `Dockerfile` | Set to `Dockerfile.debian` to opt into the shell variant |
+
+The binary is installed at a fixed `/usr/local/bin/app` because exec-form `ENTRYPOINT` and
+`HEALTHCHECK` cannot expand build ARGs; `CLI_NAME` becomes a symlink beside it.
+
+**CLI contract.** The image `HEALTHCHECK` runs `app --version`, so every ThreatFlux binary
+must support `--version` (exit 0), `--help` (exit 0), and exit non-zero on an unrecognized
+argument. See `src/main.rs` for a dependency-free reference implementation.
+
+#### When to use `Dockerfile.debian`
+
+Prefer the default. Reach for the sanctioned `Dockerfile.debian` variant only when
+distroless genuinely cannot work:
+
+1. The application **shells out at runtime** — distroless has no shell.
+2. The application needs **extra runtime OS packages** (`RUST_TEMPLATE_EXTRA_RUNTIME_PACKAGES`)
+   — distroless has no package manager.
+
+The trade-off is real: the debian variant measures ~171 MB against ~24 MB for distroless, and
+carries a shell, apt, and coreutils in the final image. Adopting it is a deliberate choice —
+record the reason in your repo's README so a later audit doesn't "fix" it back.
 
 ### Runner Variables
 
