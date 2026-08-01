@@ -7,7 +7,7 @@
 [![Crates.io](https://img.shields.io/crates/v/PROJECT_NAME.svg)](https://crates.io/crates/PROJECT_NAME)
 [![Documentation](https://docs.rs/PROJECT_NAME/badge.svg)](https://docs.rs/PROJECT_NAME)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org)
 
 **PROJECT_DESCRIPTION**
 
@@ -113,7 +113,7 @@ If this repository is primarily a CLI or service, replace this section with the 
 
 ### Prerequisites
 
-- Rust 1.96.0 or later
+- Rust 1.97.1 or later
 - Additional system dependencies if any
 
 ### Building

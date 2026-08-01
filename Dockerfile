@@ -17,7 +17,7 @@
 # Dependabot refreshes the first FROM (the Rust builder); maintainers refresh
 # the later runtime digest with the command above during template updates.
 
-FROM rust:1.97.0-bookworm@sha256:8fa55b2f3ddf97471ab6a767bfa3f37e6bad0986ba823e75fea57e2a2a5c3073 AS rust-base
+FROM rust:1.97.1-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa AS rust-base
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
@@ -95,7 +95,7 @@ RUN mkdir -p /home/builder/out/bin /home/builder/out/doc \
     fi && \
     cp /build/sbom.cdx.json /home/builder/out/doc/sbom.cdx.json
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:66aa873a4a14fb164aa01296058efd8253744606d72715e45acface073359faa AS runtime
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e AS runtime
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
