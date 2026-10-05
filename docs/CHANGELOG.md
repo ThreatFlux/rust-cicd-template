@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refresh development Rust and both Docker builders to 1.99.0 while retaining the tested 1.97.1 MSRV.
 - Refresh verified action and tool pins, require real coverage and security artifacts, and install worktree-aware local gates.
+- Run OSSF Scorecard only for scheduled scans, default-branch pushes and dispatches, and same-repository pull requests; default CI, Security and Docker workflow tokens to read-only; stop installing pre-commit in `make dev-setup`.
 
 
 ### Added
