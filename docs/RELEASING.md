@@ -25,8 +25,8 @@ Releases are driven by [Conventional Commits](https://www.conventionalcommits.or
 
 1. Analyzes commits since the last tag.
 2. Determines the version bump (patch / minor / major) from commit prefixes.
-3. Creates a new Git tag (`v*`).
-4. The tag triggers `release.yml`, which builds, packages, publishes, and creates the GitHub Release.
+3. Commits the version bump, creates a new Git tag (`v*`), and creates the GitHub Release with generated notes.
+4. Dispatches `release.yml` (build, package, SBOM, crates.io) and `docker.yml` (image build, scan, sign, SBOM) for that tag. Tags pushed with the workflow `GITHUB_TOKEN` do not trigger other workflows on their own, so this explicit dispatch is required.
 
 **No manual steps are required for routine releases.**
 
@@ -53,9 +53,21 @@ Use this when the automated flow is insufficient (e.g., pre-release versions, ho
    git push origin main --tags
    ```
 
+### Dry Run
+
+To exercise the release build without tagging, creating a GitHub Release or publishing,
+dispatch `release.yml` with `dry_run` enabled and the current manifest version:
+
+```bash
+gh workflow run release.yml --ref main -f version="$(python3 scripts/release_version.py current)" -f dry_run=true
+```
+
+This runs every build target, packaging, the release SBOM and `cargo publish --dry-run`;
+artifacts are kept on the workflow run only.
+
 ### What Happens Next
 
-The `v*` tag triggers `release.yml`:
+A `v*` tag pushed by a maintainer triggers `release.yml` (auto-release dispatches it instead):
 
 | Step | Artifact |
 |------|----------|
@@ -64,7 +76,7 @@ The `v*` tag triggers `release.yml`:
 | Publish | crates.io (if `CRATES_IO_TOKEN` secret is set) |
 | GitHub Release | Checksums + packaged assets attached |
 
-The `docker.yml` workflow also triggers on the tag, producing:
+The `docker.yml` workflow also runs for the tag (on push, or dispatched by auto-release), producing:
 
 | Step | Artifact |
 |------|----------|
