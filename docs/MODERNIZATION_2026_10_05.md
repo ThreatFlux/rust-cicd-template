@@ -43,6 +43,8 @@ coverage job retains required LCOV output on pull requests. SBOM generation
 excludes its destination directory and requires a nonempty report. The full
 local gate adds strict Clippy, feature powerset, MSRV, coverage, benchmark
 compilation and SBOM validation; hooks apply only to the current worktree.
+The hooks call `make` directly, so `make dev-setup` no longer installs the
+optional pre-commit framework.
 
 Security report generation and scanner execution failures now fail their jobs.
 TruffleHog still reports verified findings informationally, while its documented
@@ -50,7 +52,12 @@ finding exit code 183 is distinguished from execution failures. Gitleaks still
 fails on findings. Trivy still reports HIGH/CRITICAL findings informationally;
 its native SARIF must be valid and present. Scorecard retains its existing
 publication and scan policy, with Rust environment variables moved into the
-other jobs to meet its [publication restrictions](https://github.com/ossf/scorecard-action/blob/2d1146689b8cda280b9bc96326124645441f03bc/README.md#workflow-restrictions).
+other jobs, read-only workflow-level permissions and a literal `ubuntu-latest`
+runner to meet its [publication restrictions](https://github.com/ossf/scorecard-action/blob/2d1146689b8cda280b9bc96326124645441f03bc/README.md#workflow-restrictions).
+Its scan failures are no longer masked; the job runs only for scheduled scans,
+default-branch pushes and dispatches, and same-repository pull requests, because
+the action rejects other refs. CI, Security and Docker workflows default the
+token to `contents: read`, with job-level scopes where needed.
 No security exceptions, lint suppressions or ignored tests were added.
 
 Local validation passed `make ci-local`, actual Rust 1.97.1 tests, package

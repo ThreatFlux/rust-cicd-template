@@ -19,6 +19,9 @@ on:
     - cron: "0 0 * * 0"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -236,7 +239,7 @@ jobs:
         run: cargo check --locked --workspace --all-features
 
       - name: Check feature combinations
-        run: cargo hack check --workspace --feature-powerset --no-dev-deps
+        run: cargo hack check --locked --workspace --feature-powerset --no-dev-deps
 
   docs:
     name: Documentation

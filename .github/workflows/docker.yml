@@ -20,6 +20,10 @@ on:
     - cron: "0 4 * * 1"
   workflow_dispatch:
 
+# Read-only by default; each job requests the registry/SARIF/OIDC scopes it needs.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   DOCKERHUB_REGISTRY: docker.io
@@ -300,6 +304,9 @@ jobs:
     needs: build
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Get short SHA
         id: sha

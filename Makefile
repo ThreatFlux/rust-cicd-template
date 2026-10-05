@@ -55,8 +55,8 @@ dev-setup: ## Install development tools
 	@cargo install cargo-deny --version 0.20.2 --locked
 	@cargo install cargo-cyclonedx --version 0.5.9 --locked
 	@cargo install cargo-hack --version 0.6.45 --locked
-	@python3 -m pip install --user pre-commit
 	@echo "$(GREEN)Development tools installed!$(NC)"
+	@echo "$(BLUE)Git hooks call make directly (make install-hooks); the pre-commit framework is optional for .pre-commit-config.yaml (e.g. pipx install pre-commit).$(NC)"
 
 .PHONY: install-hooks hooks-install
 install-hooks: ## Install hooks for this worktree without changing sibling hooks

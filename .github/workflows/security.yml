@@ -9,6 +9,12 @@ on:
     - cron: "0 3 * * 1"
   workflow_dispatch:
 
+# Read-only by default; jobs that upload SARIF or publish Scorecard results
+# request their extra scopes explicitly. Scorecard publication rejects
+# workflow-level write permissions.
+permissions:
+  contents: read
+
 jobs:
   audit:
     name: Security Audit
@@ -219,8 +225,16 @@ jobs:
 
   scorecard:
     name: OSSF Scorecard
-    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Scorecard publication only accepts a literal GitHub-hosted Ubuntu label,
+    # so this job does not use the configurable runner variable.
+    runs-on: ubuntu-latest
+    # scorecard-action rejects non-PR events off the default branch
+    # (for example pushes to dev or dispatches from feature branches), so only
+    # run for scheduled scans, default-branch pushes/dispatches and same-repo PRs.
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     permissions:
       security-events: write
       id-token: write
