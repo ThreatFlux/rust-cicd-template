@@ -47,10 +47,15 @@ Use this when the automated flow is insufficient (e.g., pre-release versions, ho
    git add Cargo.toml docs/CHANGELOG.md
    git commit -m "chore: release v1.2.3"
    ```
-5. Tag:
+5. Tag, either by pushing it yourself:
    ```bash
    git tag v1.2.3
    git push origin main --tags
+   ```
+   or, once the bump is on `main`, by dispatching `release.yml`. It creates the
+   annotated `v1.2.3` tag through the API and dispatches `docker.yml` for it:
+   ```bash
+   gh workflow run release.yml --ref main -f version=1.2.3
    ```
 
 ### Dry Run
@@ -71,28 +76,30 @@ A `v*` tag pushed by a maintainer triggers `release.yml` (auto-release dispatche
 
 | Step | Artifact |
 |------|----------|
-| Cross-compile | Linux x86_64, Linux aarch64, macOS universal, Windows x86_64 |
-| Package | `.tar.gz` (Unix) and `.zip` (Windows) with binary + LICENSE + README |
-| Publish | crates.io (if `CRATES_IO_TOKEN` secret is set) |
-| GitHub Release | Checksums + packaged assets attached |
+| Build | Linux x86_64 (gnu and musl), Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (MSVC) |
+| Package | `.tar.gz` plus `.sha256` (Unix) and `.zip` (Windows), each holding the binary only |
+| SBOM | CycloneDX release SBOM (`<binary>-v<version>.cdx.json`) |
+| Publish | crates.io (if `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` is set; skipped for pre-releases) |
+| GitHub Release | Archives, Unix checksums and the release SBOM attached |
 
-The `docker.yml` workflow also runs for the tag (on push, or dispatched by auto-release), producing:
+The `docker.yml` workflow also runs for the tag (on a maintainer push, or dispatched by auto-release or `release.yml`), producing:
 
 | Step | Artifact |
 |------|----------|
-| Build | Multi-arch Docker image |
+| Build | `linux/amd64` and `linux/arm64` image |
 | Scan | Trivy vulnerability scan |
-| Sign | Cosign image signature |
-| SBOM | CycloneDX image SBOM |
-| Push | `ghcr.io/threatflux/<image>:<tag>` |
-| Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.99.0`, `ghcr.io/threatflux/rust-cicd-template:base-rust-latest` |
+| Sign | Cosign keyless image signature |
+| SBOM | SPDX image SBOM (workflow artifact) |
+| Push | `ghcr.io/threatflux/<image>` and `docker.io/<namespace>/<image>` with semver tags (`1.2.3`, `1.2`, `1`) and the short SHA |
+| Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.99.0` (`base-rust-latest` on `main` only) |
 
 ### Required Permissions
 
 | Secret | Holder | Purpose |
 |--------|--------|---------|
-| `GITHUB_TOKEN` | Automatic | Release assets, GHCR push |
-| `CRATES_IO_TOKEN` | Repo admin | crates.io publish |
+| `GITHUB_TOKEN` | Automatic | Tags, release assets, workflow dispatch, GHCR push |
+| `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` | Repo or org admin | crates.io publish; an org-level secret also counts |
+| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Repo or org admin | Docker Hub push |
 
 ### Rollback
 

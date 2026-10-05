@@ -44,6 +44,11 @@ jobs:
   prepare:
     name: Prepare Release
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    permissions:
+      # Create the release tag for a manual dispatch.
+      contents: write
+      # Dispatch docker.yml for a tag this job created.
+      actions: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       source_ref: ${{ steps.release_ref.outputs.source_ref }}
@@ -94,6 +99,8 @@ jobs:
 
       - name: Ensure release tag
         id: release_ref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
@@ -107,6 +114,7 @@ jobs:
             exit 0
           fi
 
+          TAG_CREATED="false"
           if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
             TAG_SHA="$(git rev-parse "${TAG}^{commit}")"
             if [[ "${TAG_SHA}" != "${TARGET_SHA}" ]]; then
@@ -114,14 +122,34 @@ jobs:
               exit 1
             fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            git tag -a "${TAG}" "${TARGET_SHA}" -m "Release ${TAG}"
-            git push origin "refs/tags/${TAG}"
+            # The checkout keeps no credentials and has no git identity, so create
+            # the annotated tag through the API with the workflow token.
+            TAG_OBJECT_SHA="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
+              -f tag="${TAG}" -f message="Release ${TAG}" -f object="${TARGET_SHA}" -f type=commit \
+              --jq '.sha')"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" -f sha="${TAG_OBJECT_SHA}" --silent
+            echo "Created ${TAG} at ${TARGET_SHA}"
+            TAG_CREATED="true"
           else
             echo "Missing expected release tag ${TAG}"
             exit 1
           fi
 
-          echo "source_ref=refs/tags/${TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "source_ref=refs/tags/${TAG}"
+            echo "tag=${TAG}"
+            echo "tag_created=${TAG_CREATED}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Tags created with GITHUB_TOKEN start no workflows, so build the container
+      # images for a tag this run created (auto-release and tag pushes cover the rest).
+      - name: Dispatch container workflow for new tag
+        if: steps.release_ref.outputs.tag_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release_ref.outputs.tag }}
+        run: gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
 
   build:
     name: Build (${{ matrix.target }})
