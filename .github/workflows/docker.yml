@@ -75,7 +75,13 @@ jobs:
       - name: Detect Rust toolchain version
         id: rust_toolchain
         run: |
-          TOOLCHAIN_VERSION="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*\"\\(.*\\)\"/\\1/p' rust-toolchain.toml | sed -n '1p')"
+          set -euo pipefail
+          TOOLCHAIN_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          if [[ -z "${TOOLCHAIN_VERSION}" ]]; then
+            echo "::error::Could not read toolchain.channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "Rust toolchain: ${TOOLCHAIN_VERSION}"
           echo "version=${TOOLCHAIN_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Select build platforms
