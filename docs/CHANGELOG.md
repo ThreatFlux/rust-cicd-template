@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Run OSSF Scorecard only for scheduled scans, default-branch pushes and dispatches, and same-repository pull requests; default CI, Security and Docker workflow tokens to read-only; stop installing pre-commit in `make dev-setup`.
 - Auto Release now dispatches `release.yml` and `docker.yml` for the tag it creates, because tags pushed with `GITHUB_TOKEN` start no workflows; `release.yml` gains a `dry_run` input that builds and verifies without tagging, releasing or publishing.
 - Run `release.yml` build steps with bash on every runner; the Windows build previously failed under the default pwsh shell.
+- Fix the Docker base-image tag version read from `rust-toolchain.toml`; the old `sed` expression never matched and published `base-rust-` instead of `base-rust-<version>`.
 
 
 ### Added
