@@ -265,7 +265,7 @@ jobs:
           python3 -c "import json; p=json.load(open('trivy-results.sarif')); raise SystemExit(0 if p.get('version') == '2.1.0' and p.get('runs') else 'invalid Trivy SARIF')"
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@416ff0dea110f80f0f56f0046500dbf7420e4bb0 # codeql-bundle-v2.27.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: trivy-results.sarif
         if: always() && hashFiles('trivy-results.sarif') != ''

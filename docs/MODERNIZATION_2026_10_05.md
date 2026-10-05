@@ -19,7 +19,11 @@ in the manifest or lockfile to upgrade.
 All five workflows were reviewed. Their 74 action uses are pinned to verified
 upstream commits, and their supplied inputs were checked against those exact
 action schemas. Updated action versions include Build Push 7.4.0, Buildx 4.4.1,
-QEMU 4.4.0, Install Action 2.87.25, SBOM Action 0.24.3 and CodeQL bundle 2.27.1.
+QEMU 4.4.0, Install Action 2.87.25, SBOM Action 0.24.3 and CodeQL Action 4.38.2.
+CodeQL uses the current stable Action release tag `v4.38.2`, rather than a
+separate CLI bundle tag. Its annotated tag resolves to commit
+`2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2`; the exact upload action supports
+the existing SARIF inputs and uses Node 24.
 Already current checkout, artifact, cache, login, metadata, Trivy, Cosign and
 Scorecard actions retain their verified pins.
 
