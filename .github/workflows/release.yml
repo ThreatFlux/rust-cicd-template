@@ -94,6 +94,8 @@ jobs:
 
       - name: Ensure release tag
         id: release_ref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
@@ -114,8 +116,26 @@ jobs:
               exit 1
             fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            git tag -a "${TAG}" "${TARGET_SHA}" -m "Release ${TAG}"
-            git push origin "refs/tags/${TAG}"
+            # The checkout keeps no credentials and has no git identity, so create
+            # the annotated tag through the API with the workflow token.
+            TAG_OBJECT_SHA="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
+              -f tag="${TAG}" -f message="Release ${TAG}" -f object="${TARGET_SHA}" -f type=commit \
+              --jq '.sha')"
+            if gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" -f sha="${TAG_OBJECT_SHA}" --silent; then
+              echo "Created ${TAG} at ${TARGET_SHA}; dispatch docker.yml for it separately"
+            else
+              # Another run may have created the tag after checkout; accept it only
+              # when it resolves to the commit being released.
+              if ! REMOTE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/refs/tags/${TAG}" --jq '.sha' 2>/dev/null)"; then
+                REMOTE_SHA=""
+              fi
+              if [[ "${REMOTE_SHA}" != "${TARGET_SHA}" ]]; then
+                echo "Could not create ${TAG}; remote tag resolves to '${REMOTE_SHA:-nothing}', expected ${TARGET_SHA}"
+                exit 1
+              fi
+              echo "${TAG} already exists at ${TARGET_SHA}"
+            fi
           else
             echo "Missing expected release tag ${TAG}"
             exit 1
@@ -345,7 +365,8 @@ jobs:
     name: Publish to crates.io
     needs: [prepare, build]
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    if: "!contains(needs.prepare.outputs.version, '-')"
+    # Skip pre-releases: a version suffix (1.2.3-rc1) or the prerelease dispatch input.
+    if: "!contains(needs.prepare.outputs.version, '-') && !(github.event_name == 'workflow_dispatch' && inputs.prerelease)"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
