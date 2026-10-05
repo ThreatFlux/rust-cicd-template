@@ -229,3 +229,17 @@ jobs:
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Release v${VERSION}" --notes-file release_notes.md
           fi
+
+      # Tags pushed with GITHUB_TOKEN do not trigger other workflows, so start the
+      # tag-driven release (binaries, SBOM, crates.io) and container workflows here.
+      - name: Dispatch release and container workflows
+        if: steps.publish_release_commit.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check.outputs.next_version }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" \
+            -f version="$VERSION" -f source_ref="refs/tags/${TAG}"
+          gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
