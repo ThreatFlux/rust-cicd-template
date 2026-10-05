@@ -29,7 +29,8 @@ permissions:
   actions: write
 
 env:
-  RUST_VERSION: 1.97.1
+  RUST_VERSION: 1.99.0
+  RUSTUP_TOOLCHAIN: 1.99.0
 
 jobs:
   check:
@@ -81,11 +82,11 @@ jobs:
             LAST_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
 
-          CHANGES=$(git log $LAST_TAG..HEAD --oneline --no-merges | wc -l)
-          FEAT_COUNT=$(git log $LAST_TAG..HEAD --grep="^feat" --oneline | wc -l)
-          FIX_COUNT=$(git log $LAST_TAG..HEAD --grep="^fix" --oneline | wc -l)
-          BREAKING_BODY_COUNT=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
-          BREAKING_SUBJECT_COUNT=$(git log $LAST_TAG..HEAD --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
+          CHANGES=$(git log "$LAST_TAG..HEAD" --oneline --no-merges | wc -l)
+          FEAT_COUNT=$(git log "$LAST_TAG..HEAD" --grep="^feat" --oneline | wc -l)
+          FIX_COUNT=$(git log "$LAST_TAG..HEAD" --grep="^fix" --oneline | wc -l)
+          BREAKING_BODY_COUNT=$(git log "$LAST_TAG..HEAD" --grep="BREAKING CHANGE" --oneline | wc -l)
+          BREAKING_SUBJECT_COUNT=$(git log "$LAST_TAG..HEAD" --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
           BREAKING_COUNT=$((BREAKING_BODY_COUNT + BREAKING_SUBJECT_COUNT))
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -116,10 +117,10 @@ jobs:
             LAST_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
 
-            BREAKING_BODY=$(git log $LAST_TAG..HEAD --grep="BREAKING CHANGE" --oneline | wc -l)
-            BREAKING_SUBJECT=$(git log $LAST_TAG..HEAD --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
+            BREAKING_BODY=$(git log "$LAST_TAG..HEAD" --grep="BREAKING CHANGE" --oneline | wc -l)
+            BREAKING_SUBJECT=$(git log "$LAST_TAG..HEAD" --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
             BREAKING=$((BREAKING_BODY + BREAKING_SUBJECT))
-            FEAT=$(git log $LAST_TAG..HEAD --grep="^feat" --oneline | wc -l)
+            FEAT=$(git log "$LAST_TAG..HEAD" --grep="^feat" --oneline | wc -l)
 
             if [[ $BREAKING -gt 0 ]]; then
               BUMP_TYPE="major"
@@ -157,15 +158,21 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Verify active Rust compiler
+        shell: bash
+        run: |
+          rustc --version --verbose
+          cargo --version
 
       - name: Update version
         run: |
           VERSION="${{ needs.check.outputs.next_version }}"
           python3 scripts/release_version.py set "$VERSION"
-          cargo check --workspace --all-features 2>/dev/null || true
+          cargo check --workspace --all-features
         env:
           VERSION: ${{ needs.check.outputs.next_version }}
 
@@ -173,20 +180,15 @@ jobs:
         run: |
           VERSION="${{ needs.check.outputs.next_version }}"
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          echo "## Release v$VERSION" > release_notes.md
-          echo "" >> release_notes.md
+          printf '## Release v%s\n\n' "$VERSION" > release_notes.md
           if [ -n "$LAST_TAG" ]; then
-            FEATURES=$(git log $LAST_TAG..HEAD --grep="^feat" --pretty=format:"- %s (%h)" --no-merges)
+            FEATURES=$(git log "$LAST_TAG..HEAD" --grep="^feat" --pretty=format:"- %s (%h)" --no-merges)
             if [ -n "$FEATURES" ]; then
-              echo "### Features" >> release_notes.md
-              echo "$FEATURES" >> release_notes.md
-              echo "" >> release_notes.md
+              printf '### Features\n%s\n\n' "$FEATURES" >> release_notes.md
             fi
-            FIXES=$(git log $LAST_TAG..HEAD --grep="^fix" --pretty=format:"- %s (%h)" --no-merges)
+            FIXES=$(git log "$LAST_TAG..HEAD" --grep="^fix" --pretty=format:"- %s (%h)" --no-merges)
             if [ -n "$FIXES" ]; then
-              echo "### Bug Fixes" >> release_notes.md
-              echo "$FIXES" >> release_notes.md
-              echo "" >> release_notes.md
+              printf '### Bug Fixes\n%s\n\n' "$FIXES" >> release_notes.md
             fi
           fi
 

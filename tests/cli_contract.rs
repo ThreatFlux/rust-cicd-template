@@ -19,7 +19,7 @@ fn version_exits_successfully() {
         stdout.trim_end(),
         format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
     );
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn help_exits_successfully() {
     assert!(output.status.success());
     assert!(stdout.contains("USAGE:"));
     assert!(stdout.contains("--version"));
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]

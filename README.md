@@ -16,7 +16,7 @@
 
 ---
 
-A batteries-included template that encodes best practices for building, testing, securing, and shipping Rust applications. Uses **Rust 1.97.1** as the maintained baseline, defaults to the **Rust 2024 edition**, and supports both single-crate projects and multi-crate workspaces.
+A batteries-included template that encodes best practices for building, testing, securing, and shipping Rust applications. Uses **Rust 1.99.0** for development and retains **Rust 1.97.1** as the tested minimum, defaults to the **Rust 2024 edition**, and supports both single-crate projects and multi-crate workspaces.
 
 ## Table of Contents
 
@@ -47,7 +47,8 @@ make template-check
 
 # Install local tooling and run full CI locally.
 make dev-setup
-make ci
+make hooks-install
+make ci-local
 ```
 
 After generating, replace `README.md` with `README_TEMPLATE.md`, then delete `README_TEMPLATE.md`. The `make template-check` target will fail until this handoff is complete.

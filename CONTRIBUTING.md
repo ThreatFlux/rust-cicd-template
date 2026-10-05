@@ -8,7 +8,7 @@ This repository is the canonical Rust CI/CD template used across ThreatFlux proj
 2. Clone your fork of this repository
 3. Create a branch: `git checkout -b feat/your-change`
 4. Make your changes
-5. Run checks: `make ci`
+5. Run checks: `make ci-local`
 6. Open a Pull Request
 
 ## Development Setup
@@ -16,7 +16,7 @@ This repository is the canonical Rust CI/CD template used across ThreatFlux proj
 ```bash
 make dev-setup
 make install-hooks
-make ci
+make ci-local
 ```
 
 ## Commit Guidelines

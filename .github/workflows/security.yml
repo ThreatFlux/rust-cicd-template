@@ -9,16 +9,23 @@ on:
     - cron: "0 3 * * 1"
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.97.1
-  BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
-  SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
+# Read-only by default; jobs that upload SARIF or publish Scorecard results
+# request their extra scopes explicitly. Scorecard publication rejects
+# workflow-level write permissions.
+permissions:
+  contents: read
 
 jobs:
   audit:
     name: Security Audit
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_VERSION: 1.99.0
+      RUSTUP_TOOLCHAIN: 1.99.0
+      BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
+      SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,21 +33,28 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
+      - name: Verify active Rust compiler
+        shell: bash
+        run: |
+          rustc --version --verbose
+          cargo --version
+
       - name: Install cargo-audit
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: cargo-audit
+          tool: cargo-audit@0.22.2
 
       - name: Run security audit
         run: cargo audit
 
       - name: Generate audit report
-        run: cargo audit --json > audit-report.json
-        continue-on-error: true
+        run: |
+          cargo audit --json > audit-report.json
+          python3 -c "import json; json.load(open('audit-report.json'))"
 
       - name: Upload audit report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -48,10 +62,18 @@ jobs:
           name: audit-report
           path: audit-report.json
           retention-days: 30
+          if-no-files-found: error
 
   deny:
     name: Dependency Check
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_VERSION: 1.99.0
+      RUSTUP_TOOLCHAIN: 1.99.0
+      BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
+      SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,14 +81,20 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
+      - name: Verify active Rust compiler
+        shell: bash
+        run: |
+          rustc --version --verbose
+          cargo --version
+
       - name: Install cargo-deny
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: cargo-deny
+          tool: cargo-deny@0.20.2
 
       - name: Check licenses
         run: cargo deny check licenses
@@ -76,11 +104,17 @@ jobs:
 
       - name: Check bans
         run: cargo deny check bans
-        continue-on-error: true
 
   supply-chain:
     name: Supply Chain
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_VERSION: 1.99.0
+      RUSTUP_TOOLCHAIN: 1.99.0
+      BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
+      SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,14 +122,20 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
+      - name: Verify active Rust compiler
+        shell: bash
+        run: |
+          rustc --version --verbose
+          cargo --version
+
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: cargo-cyclonedx@0.5.8
+          tool: cargo-cyclonedx@0.5.9
 
       - name: Generate SBOM
         run: make sbom BINARY_NAME="${BINARY_NAME}" SBOM_MANIFEST_PATH="${SBOM_MANIFEST_PATH}"
@@ -106,6 +146,7 @@ jobs:
           name: sbom
           path: sbom/*.json
           retention-days: 30
+          if-no-files-found: error
 
   secrets:
     name: Secret Scanning
@@ -121,14 +162,49 @@ jobs:
           fetch-depth: 0
 
       - name: TruffleHog Scan
-        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
+        env:
+          # Current stable image, with the same verified-only informational policy.
+          TRUFFLEHOG_IMAGE: trufflesecurity/trufflehog:3.98.0@sha256:0f32a1d73e552eaf528a4ac0800a26d32169d159bcd77303c833eb9dcdcb848b
+        run: |
+          set -euo pipefail
+          # The raw report contains secret values; never leave it for the artifact upload.
+          trap 'rm -f trufflehog.json' EXIT
+          scan_status=0
+          docker run --rm -v "$PWD:/repo:ro" "$TRUFFLEHOG_IMAGE" \
+            git file:///repo --branch HEAD --only-verified --fail --fail-on-scan-errors --json --no-update \
+            > trufflehog.json 2> trufflehog.stderr || scan_status=$?
+          cat trufflehog.stderr
+          # Upstream reserves 183 for findings; execution failures still fail CI.
+          if [[ "$scan_status" != 0 && "$scan_status" != 183 ]]; then
+            exit "$scan_status"
+          fi
+          python3 - <<'PYCODE'
+          import json
+          from pathlib import Path
+          findings = [json.loads(line) for line in Path('trufflehog.json').read_text().splitlines() if line.strip()]
+          if not all(item.get('Verified') is True for item in findings):
+              raise SystemExit('TruffleHog produced an unexpected report')
+          # Keep only non-secret context; Raw, RawV2 and SecretParts carry credential material.
+          safe_fields = ('SourceMetadata', 'SourceName', 'DetectorName', 'DecoderName', 'Verified', 'Redacted')
+          redacted = [{key: item[key] for key in safe_fields if key in item} for item in findings]
+          Path('trufflehog-redacted.json').write_text(''.join(json.dumps(item) + '\n' for item in redacted))
+          print(f'TruffleHog completed with {len(findings)} verified informational findings')
+          PYCODE
+
+      - name: Upload TruffleHog report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          extra_args: --only-verified
-        continue-on-error: true
+          name: trufflehog-report
+          path: |
+            trufflehog-redacted.json
+            trufflehog.stderr
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Install Gitleaks
         env:
-          GITLEAKS_VERSION: "8.30.0"
+          GITLEAKS_VERSION: "8.30.1"
         run: |
           set -euo pipefail
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
@@ -148,15 +224,23 @@ jobs:
             --report-path gitleaks.sarif
 
       - name: Upload Gitleaks results
-        uses: github/codeql-action/upload-sarif@3d8036cf7fe7433e4a725cf513a6ea56c7fd0f14 # codeql-bundle-v2.25.0
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: gitleaks.sarif
         if: always() && hashFiles('gitleaks.sarif') != ''
 
   scorecard:
     name: OSSF Scorecard
-    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Scorecard publication only accepts a literal GitHub-hosted Ubuntu label,
+    # so this job does not use the configurable runner variable.
+    runs-on: ubuntu-latest
+    # scorecard-action rejects non-PR events off the default branch
+    # (for example pushes to dev or dispatches from feature branches), so only
+    # run for scheduled scans, default-branch pushes/dispatches and same-repo PRs.
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     permissions:
       security-events: write
       id-token: write
@@ -174,4 +258,17 @@ jobs:
           results_file: scorecard.sarif
           results_format: sarif
           publish_results: true
-        continue-on-error: true
+
+      - name: Upload Scorecard report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-report
+          path: scorecard.sarif
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Scorecard results
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard

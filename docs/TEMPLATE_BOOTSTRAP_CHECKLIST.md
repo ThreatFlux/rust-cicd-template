@@ -54,7 +54,14 @@ Run locally:
 
 ```bash
 make dev-setup
+make hooks-install
 make template-check
-make ci
+make ci-local
 make docker-build
 ```
+
+Development uses the pinned Rust 1.99.0 toolchain. The default package MSRV is
+1.97.1; keep `Cargo.toml`, `Makefile` and the CI MSRV job aligned when changing it.
+Hooks are installed for the current Git worktree: pre-commit runs formatting,
+Clippy and doc tests, and pre-push runs `make ci-local`. The full local gate also
+checks strict Clippy, the feature powerset, coverage, benchmarks, MSRV and SBOMs.
