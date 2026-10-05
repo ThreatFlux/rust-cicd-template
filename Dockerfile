@@ -17,7 +17,7 @@
 # Dependabot refreshes the first FROM (the Rust builder); maintainers refresh
 # the later runtime digest with the command above during template updates.
 
-FROM rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922 AS rust-base
+FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rust-base
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
@@ -59,15 +59,16 @@ ENV PATH="/home/builder/.cargo/bin:${PATH}"
 
 COPY --chown=builder:builder . .
 
-RUN if [ -n "${BINARY_PACKAGE}" ]; then \
-      cargo build --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features; \
+RUN rustc --version --verbose && cargo --version && \
+    if [ -n "${BINARY_PACKAGE}" ]; then \
+      cargo build --locked --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features; \
     else \
-      cargo build --release --bin "${BINARY_NAME}" --all-features || cargo build --release --all-features; \
+      cargo build --locked --release --bin "${BINARY_NAME}" --all-features || cargo build --locked --release --all-features; \
     fi
 
 # cargo-cyclonedx writes the SBOM beside the manifest it was handed, which in a
 # workspace is not necessarily /build. The find normalizes the output location.
-RUN cargo install cargo-cyclonedx --locked --version 0.5.8 && \
+RUN cargo install cargo-cyclonedx --locked --version 0.5.9 && \
     cargo cyclonedx \
       --manifest-path "${SBOM_MANIFEST_PATH}" \
       --all-features \

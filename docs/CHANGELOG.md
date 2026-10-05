@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Refresh development Rust and both Docker builders to 1.99.0 while retaining the tested 1.97.1 MSRV.
+- Refresh verified action and tool pins, require real coverage and security artifacts, and install worktree-aware local gates.
+
+
 ### Added
 
 - ARCHITECTURE.md with component map and design decision rationale
