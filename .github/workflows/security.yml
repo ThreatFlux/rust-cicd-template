@@ -167,9 +167,11 @@ jobs:
           TRUFFLEHOG_IMAGE: trufflesecurity/trufflehog:3.98.0@sha256:0f32a1d73e552eaf528a4ac0800a26d32169d159bcd77303c833eb9dcdcb848b
         run: |
           set -euo pipefail
+          # The raw report contains secret values; never leave it for the artifact upload.
+          trap 'rm -f trufflehog.json' EXIT
           scan_status=0
           docker run --rm -v "$PWD:/repo:ro" "$TRUFFLEHOG_IMAGE" \
-            git file:///repo --branch HEAD --only-verified --fail --json --no-update \
+            git file:///repo --branch HEAD --only-verified --fail --fail-on-scan-errors --json --no-update \
             > trufflehog.json 2> trufflehog.stderr || scan_status=$?
           cat trufflehog.stderr
           # Upstream reserves 183 for findings; execution failures still fail CI.
@@ -182,6 +184,10 @@ jobs:
           findings = [json.loads(line) for line in Path('trufflehog.json').read_text().splitlines() if line.strip()]
           if not all(item.get('Verified') is True for item in findings):
               raise SystemExit('TruffleHog produced an unexpected report')
+          # Keep only non-secret context; Raw, RawV2 and SecretParts carry credential material.
+          safe_fields = ('SourceMetadata', 'SourceName', 'DetectorName', 'DecoderName', 'Verified', 'Redacted')
+          redacted = [{key: item[key] for key in safe_fields if key in item} for item in findings]
+          Path('trufflehog-redacted.json').write_text(''.join(json.dumps(item) + '\n' for item in redacted))
           print(f'TruffleHog completed with {len(findings)} verified informational findings')
           PYCODE
 
@@ -191,7 +197,7 @@ jobs:
         with:
           name: trufflehog-report
           path: |
-            trufflehog.json
+            trufflehog-redacted.json
             trufflehog.stderr
           if-no-files-found: error
           retention-days: 30

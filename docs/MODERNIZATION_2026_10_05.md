@@ -48,7 +48,8 @@ optional pre-commit framework.
 
 Security report generation and scanner execution failures now fail their jobs.
 TruffleHog still reports verified findings informationally, while its documented
-finding exit code 183 is distinguished from execution failures. Gitleaks still
+finding exit code 183 is distinguished from execution failures and scan errors.
+Its uploaded report keeps only redacted finding context, never raw secret values. Gitleaks still
 fails on findings. Trivy still reports HIGH/CRITICAL findings informationally;
 its native SARIF must be valid and present. Scorecard retains its existing
 publication and scan policy, with Rust environment variables moved into the

@@ -304,6 +304,7 @@ jobs:
     needs: build
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     if: github.event_name != 'pull_request'
+    # Read-only: pull the pushed image from GHCR and keep the SBOM as a workflow artifact.
     permissions:
       contents: read
       packages: read
@@ -325,3 +326,5 @@ jobs:
           image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
           artifact-name: sbom.spdx.json
           format: spdx-json
+          # Release assets need contents: write; release.yml attaches the release SBOMs.
+          upload-release-assets: false
