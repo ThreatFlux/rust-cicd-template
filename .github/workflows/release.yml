@@ -44,11 +44,6 @@ jobs:
   prepare:
     name: Prepare Release
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    permissions:
-      # Create the release tag for a manual dispatch.
-      contents: write
-      # Dispatch docker.yml for a tag this job created.
-      actions: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       source_ref: ${{ steps.release_ref.outputs.source_ref }}
@@ -114,7 +109,6 @@ jobs:
             exit 0
           fi
 
-          TAG_CREATED="false"
           if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
             TAG_SHA="$(git rev-parse "${TAG}^{commit}")"
             if [[ "${TAG_SHA}" != "${TARGET_SHA}" ]]; then
@@ -127,29 +121,27 @@ jobs:
             TAG_OBJECT_SHA="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
               -f tag="${TAG}" -f message="Release ${TAG}" -f object="${TARGET_SHA}" -f type=commit \
               --jq '.sha')"
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/${TAG}" -f sha="${TAG_OBJECT_SHA}" --silent
-            echo "Created ${TAG} at ${TARGET_SHA}"
-            TAG_CREATED="true"
+            if gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" -f sha="${TAG_OBJECT_SHA}" --silent; then
+              echo "Created ${TAG} at ${TARGET_SHA}; dispatch docker.yml for it separately"
+            else
+              # Another run may have created the tag after checkout; accept it only
+              # when it resolves to the commit being released.
+              if ! REMOTE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/refs/tags/${TAG}" --jq '.sha' 2>/dev/null)"; then
+                REMOTE_SHA=""
+              fi
+              if [[ "${REMOTE_SHA}" != "${TARGET_SHA}" ]]; then
+                echo "Could not create ${TAG}; remote tag resolves to '${REMOTE_SHA:-nothing}', expected ${TARGET_SHA}"
+                exit 1
+              fi
+              echo "${TAG} already exists at ${TARGET_SHA}"
+            fi
           else
             echo "Missing expected release tag ${TAG}"
             exit 1
           fi
 
-          {
-            echo "source_ref=refs/tags/${TAG}"
-            echo "tag=${TAG}"
-            echo "tag_created=${TAG_CREATED}"
-          } >> "$GITHUB_OUTPUT"
-
-      # Tags created with GITHUB_TOKEN start no workflows, so build the container
-      # images for a tag this run created (auto-release and tag pushes cover the rest).
-      - name: Dispatch container workflow for new tag
-        if: steps.release_ref.outputs.tag_created == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release_ref.outputs.tag }}
-        run: gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "source_ref=refs/tags/${TAG}" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build (${{ matrix.target }})
@@ -373,7 +365,8 @@ jobs:
     name: Publish to crates.io
     needs: [prepare, build]
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    if: "!contains(needs.prepare.outputs.version, '-')"
+    # Skip pre-releases: a version suffix (1.2.3-rc1) or the prerelease dispatch input.
+    if: "!contains(needs.prepare.outputs.version, '-') && !(github.event_name == 'workflow_dispatch' && inputs.prerelease)"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

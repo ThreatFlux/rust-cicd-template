@@ -37,25 +37,34 @@ Use this when the automated flow is insufficient (e.g., pre-release versions, ho
 ### Pre-flight
 
 1. Ensure `main` is green:
+
    ```bash
    make ci
    ```
+
 2. Update `CHANGELOG.md` — move items from `[Unreleased]` to a new version header.
 3. Bump the version in `Cargo.toml`.
 4. Commit:
+
    ```bash
    git add Cargo.toml docs/CHANGELOG.md
    git commit -m "chore: release v1.2.3"
    ```
+
 5. Tag, either by pushing it yourself:
+
    ```bash
    git tag v1.2.3
    git push origin main --tags
    ```
-   or, once the bump is on `main`, by dispatching `release.yml`. It creates the
-   annotated `v1.2.3` tag through the API and dispatches `docker.yml` for it:
+
+   or, once the bump is on `main`, by dispatching `release.yml`, which creates the
+   annotated `v1.2.3` tag through the API. A tag created with the workflow token
+   starts no other workflows, so dispatch the container build for it too:
+
    ```bash
    gh workflow run release.yml --ref main -f version=1.2.3
+   gh workflow run docker.yml --ref v1.2.3   # once the tag exists
    ```
 
 ### Dry Run
@@ -79,10 +88,10 @@ A `v*` tag pushed by a maintainer triggers `release.yml` (auto-release dispatche
 | Build | Linux x86_64 (gnu and musl), Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (MSVC) |
 | Package | `.tar.gz` plus `.sha256` (Unix) and `.zip` (Windows), each holding the binary only |
 | SBOM | CycloneDX release SBOM (`<binary>-v<version>.cdx.json`) |
-| Publish | crates.io (if `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` is set; skipped for pre-releases) |
+| Publish | crates.io (if `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` is set; skipped for `-rc`-style versions and `prerelease` dispatches) |
 | GitHub Release | Archives, Unix checksums and the release SBOM attached |
 
-The `docker.yml` workflow also runs for the tag (on a maintainer push, or dispatched by auto-release or `release.yml`), producing:
+The `docker.yml` workflow also runs for the tag (on a maintainer push, dispatched by auto-release, or dispatched by hand after a `release.yml` dispatch), producing:
 
 | Step | Artifact |
 |------|----------|
