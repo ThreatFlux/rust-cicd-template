@@ -36,7 +36,7 @@ Recommended values:
 - `RUST_TEMPLATE_BINARY_NAME`: the CLI binary to package
 - `RUST_TEMPLATE_BINARY_PACKAGE`: the package that owns that binary
 - `RUST_TEMPLATE_SBOM_MANIFEST_PATH`: the manifest used for SBOM generation
-- `RUST_TEMPLATE_PUBLISH_PACKAGES`: publish order, space separated
+- `RUST_TEMPLATE_PUBLISH_PACKAGES`: crates.io publish order, space separated (required when the root manifest has no `[package]`)
 
 Runner defaults:
 
@@ -47,6 +47,17 @@ Runner defaults:
 - `RUST_TEMPLATE_RUNNER_WINDOWS`
 - `RUST_TEMPLATE_RUNNER_MACOS_ARM64`
 - `RUST_TEMPLATE_RUNNER_MACOS_X64`
+
+## crates.io Publishing
+
+`release.yml` publishes through crates.io trusted publishing (GitHub OIDC); no registry
+secret is needed or read.
+
+- Library or CLI published to crates.io: set the `CRATES_IO_PUBLISH` repository variable to
+  `false`, publish the first version by hand, configure the crate's trusted publisher
+  (workflow `release.yml`, environment `crates-io`) and the `crates-io` environment, then
+  remove the variable. [RELEASING.md](RELEASING.md#cratesio-publishing) has the steps.
+- Never published to crates.io: set `CRATES_IO_PUBLISH` to `false` and leave it.
 
 ## Validation
 

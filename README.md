@@ -172,7 +172,7 @@ Convert the root manifest to a workspace and set these repository variables (or 
 |----------|---------|
 | `RUST_TEMPLATE_BINARY_NAME` | CLI binary to package |
 | `RUST_TEMPLATE_BINARY_PACKAGE` | Package that owns the binary |
-| `RUST_TEMPLATE_PUBLISH_PACKAGES` | Publish order, space-separated |
+| `RUST_TEMPLATE_PUBLISH_PACKAGES` | crates.io publish order, space-separated; required when the root manifest has no `[package]` |
 | `RUST_TEMPLATE_SBOM_MANIFEST_PATH` | Manifest used for SBOM generation |
 
 See [docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md](docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md) for the full setup checklist.
@@ -305,7 +305,14 @@ Defaults to GitHub-hosted runners. Set these only for custom runner labels:
 | Secret | Purpose |
 |--------|---------|
 | `GITHUB_TOKEN` | Release assets, package publishing, container publishing |
-| `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` | crates.io publishing |
+
+crates.io publishing needs no secret: `release.yml` publishes through
+[crates.io trusted publishing](https://crates.io/docs/trusted-publishing) (GitHub OIDC) from
+the `crates-io` environment. Configure the crate's trusted publisher and that environment as
+described in [docs/RELEASING.md](docs/RELEASING.md#cratesio-publishing). Set the repository
+variable `CRATES_IO_PUBLISH` to `false` to skip crates.io (a dry run still runs
+`cargo publish --dry-run`); this template repository sets it, so its own releases never
+publish the `rust-cicd-template` crate.
 
 <p align="right"><a href="#table-of-contents">back to top</a></p>
 

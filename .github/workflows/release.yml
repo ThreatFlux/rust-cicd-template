@@ -386,70 +386,175 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
       (!contains(needs.prepare.outputs.version, '-') &&
       !(github.event_name == 'workflow_dispatch' && inputs.prerelease))
+    # A real publish runs in the crates-io environment that the crate's crates.io
+    # trusted publisher names. Dry runs, and repositories that set
+    # CRATES_IO_PUBLISH=false, get an empty name instead: the job then runs
+    # outside any environment and records no deployment.
+    environment:
+      name: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && vars.CRATES_IO_PUBLISH != 'false' && 'crates-io' || '' }}
+    permissions:
+      contents: read # Check out the release source.
+      # crates-io-auth-action exchanges the job's OIDC token for a short-lived
+      # crates.io token (trusted publishing); no registry secret is used.
+      id-token: write # OIDC token for crates.io trusted publishing.
+    env:
+      # Unset or "true" publishes; "false" skips crates.io for this repository.
+      CRATES_IO_PUBLISH: ${{ vars.CRATES_IO_PUBLISH }}
     steps:
+      - name: Decide crates.io publish
+        id: gate
+        run: |
+          set -euo pipefail
+          case "$(printf '%s' "${CRATES_IO_PUBLISH}" | tr '[:upper:]' '[:lower:]')" in
+            "" | true) enabled=true ;;
+            false) enabled=false ;;
+            *)
+              echo "::error::CRATES_IO_PUBLISH must be unset, 'true' or 'false', not '${CRATES_IO_PUBLISH}'"
+              exit 1
+              ;;
+          esac
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            mode=dry-run
+            if [[ "${enabled}" == "false" ]]; then
+              echo "CRATES_IO_PUBLISH is 'false': a real run would skip crates.io; the dry run still verifies the package"
+            fi
+          elif [[ "${enabled}" == "true" ]]; then
+            mode=publish
+          else
+            mode=skip
+            message="Skipping crates.io publish: repository variable CRATES_IO_PUBLISH is 'false'"
+            echo "${message}"
+            echo "::notice title=crates.io publish skipped::${message}"
+            echo "${message}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
+        if: steps.gate.outputs.mode != 'skip'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust
+        if: steps.gate.outputs.mode != 'skip'
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Verify active Rust compiler
+        if: steps.gate.outputs.mode != 'skip'
         shell: bash
         run: |
           rustc --version --verbose
           cargo --version
 
-      - name: Verify crates.io package (dry run)
-        if: env.DRY_RUN == 'true'
+      - name: Resolve crates to publish
+        id: packages
+        if: steps.gate.outputs.mode != 'skip'
+        env:
+          MODE: ${{ steps.gate.outputs.mode }}
         run: |
           set -euo pipefail
-          if [[ -n "${PUBLISH_PACKAGES}" ]]; then
-            # One multi-package dry run resolves path dependencies between them.
-            package_args=()
-            for package in ${PUBLISH_PACKAGES}; do
-              package_args+=(-p "${package}")
-            done
-            cargo publish --locked --dry-run "${package_args[@]}"
-          else
-            cargo publish --locked --dry-run
-          fi
+          read -r -a requested <<< "${PUBLISH_PACKAGES}"
+          cargo metadata --locked --no-deps --format-version 1 > "${RUNNER_TEMP}/cargo-metadata.json"
+          # name@version of each crate to publish, in publish order: the
+          # RUST_TEMPLATE_PUBLISH_PACKAGES list, or the root package when it is unset.
+          crates="$(python3 - "${RUNNER_TEMP}/cargo-metadata.json" "${requested[@]}" <<'PY'
+          import json
+          import os
+          import sys
 
-      - name: Check crates.io token
-        id: check_token
-        if: env.DRY_RUN != 'true'
-        env:
-          TOKEN: ${{ secrets.CRATES_IO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          if [ -n "$TOKEN" ]; then
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping crates.io publish - token not configured"
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              metadata = json.load(handle)
+          by_name = {package["name"]: package for package in metadata["packages"]}
+          names = sys.argv[2:]
+          if names:
+              unknown = [name for name in names if name not in by_name]
+              if unknown:
+                  sys.exit("RUST_TEMPLATE_PUBLISH_PACKAGES names packages outside this workspace: " + " ".join(unknown))
+              selected = [by_name[name] for name in names]
+          else:
+              root_manifest = os.path.join(metadata["workspace_root"], "Cargo.toml")
+              selected = [package for package in metadata["packages"] if package["manifest_path"] == root_manifest]
+              if not selected:
+                  sys.exit("Cargo.toml has no [package]; set RUST_TEMPLATE_PUBLISH_PACKAGES to the crates to publish, in publish order")
+          print(" ".join(f"{package['name']}@{package['version']}" for package in selected))
+          PY
+          )"
+
+          # A crate version that is already on crates.io is skipped, so a re-run
+          # after a partial publish only publishes what is missing.
+          read -r -a specs <<< "${crates}"
+          pending=()
+          for spec in "${specs[@]}"; do
+            status="$(curl --silent --show-error --location --retry 3 \
+              --user-agent "${GITHUB_REPOSITORY} release workflow (https://github.com/${GITHUB_REPOSITORY})" \
+              --output /dev/null --write-out '%{http_code}' \
+              "https://crates.io/api/v1/crates/${spec%@*}/${spec#*@}")"
+            case "${status}" in
+              200) echo "${spec} is already on crates.io" ;;
+              404)
+                echo "${spec} is not on crates.io yet"
+                pending+=("${spec}")
+                ;;
+              *)
+                echo "::error::crates.io returned HTTP ${status} for ${spec}"
+                exit 1
+                ;;
+            esac
+          done
+          if [[ "${MODE}" == "publish" && "${#pending[@]}" -eq 0 ]]; then
+            echo "Every crate is already on crates.io; nothing to publish"
           fi
+          echo "crates=${crates}" >> "$GITHUB_OUTPUT"
+          echo "pending=${pending[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify crates.io package (dry run)
+        if: steps.gate.outputs.mode == 'dry-run'
+        env:
+          CRATES: ${{ steps.packages.outputs.crates }}
+        run: |
+          set -euo pipefail
+          # One multi-package dry run resolves path dependencies between them.
+          read -r -a specs <<< "${CRATES}"
+          package_args=()
+          for spec in "${specs[@]}"; do
+            package_args+=(-p "${spec%@*}")
+          done
+          cargo publish --locked --dry-run "${package_args[@]}"
+
+      - name: Authenticate with crates.io
+        id: crates-io-auth
+        if: steps.gate.outputs.mode == 'publish' && steps.packages.outputs.pending != ''
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: Publish to crates.io
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.gate.outputs.mode == 'publish' && steps.packages.outputs.pending != ''
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}
-          VERSION: ${{ needs.prepare.outputs.version }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+          PENDING: ${{ steps.packages.outputs.pending }}
         run: |
           set -euo pipefail
-          if [[ -n "${PUBLISH_PACKAGES}" ]]; then
-            for package in ${PUBLISH_PACKAGES}; do
-              cargo publish -p "${package}" --locked
-              for _ in $(seq 1 20); do
-                if curl -fsSL "https://crates.io/api/v1/crates/${package}" -o "$RUNNER_TEMP/crate-metadata.json" &&
-                  python3 -c 'import json, sys; payload=json.load(open(sys.argv[2])); raise SystemExit(0 if any(v["num"] == sys.argv[1] for v in payload.get("versions", [])) else 1)' "$VERSION" "$RUNNER_TEMP/crate-metadata.json"
-                then
-                  break
-                fi
-                sleep 15
-              done
+          read -r -a pending <<< "${PENDING}"
+          for spec in "${pending[@]}"; do
+            package="${spec%@*}"
+            version="${spec#*@}"
+            cargo publish --locked -p "${package}"
+            # Wait until crates.io serves the new version before publishing
+            # crates that depend on it; a version it never serves fails the run.
+            served=false
+            for _ in $(seq 1 20); do
+              if curl --fail --silent --show-error --location \
+                --user-agent "${GITHUB_REPOSITORY} release workflow (https://github.com/${GITHUB_REPOSITORY})" \
+                --output /dev/null "https://crates.io/api/v1/crates/${package}/${version}"; then
+                served=true
+                break
+              fi
+              sleep 15
             done
-          else
-            cargo publish --locked
-          fi
+            if [[ "${served}" != "true" ]]; then
+              echo "::error::crates.io did not serve ${spec} within 5 minutes of publishing it"
+              exit 1
+            fi
+          done

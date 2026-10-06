@@ -27,12 +27,15 @@ the existing SARIF inputs and uses Node 24.
 Already current checkout, artifact, cache, login, metadata, Trivy, Cosign and
 Scorecard actions retain their verified pins.
 
-Both Dockerfiles use the current Rust 1.99.0 Bookworm image index digest
+Both Dockerfiles used the then-current Rust 1.99.0 Bookworm image index digest
 `59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0`.
-The current Debian slim runtime digest is
+The Debian slim runtime digest was
 `3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251`;
-the already current distroless runtime digest remains
+the already current distroless runtime digest remained
 `9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f`.
+These Debian 12 (bookworm) images were later replaced by Debian 13 (trixie):
+`rust:1.99.0-trixie`, `gcr.io/distroless/cc-debian13:nonroot` and
+`debian:trixie-slim` (see the changelog).
 Native ARM64 builds and version, help, non-root user and healthcheck contract
 checks passed for both runtime variants. Hosted PR Docker validation exercises
 the existing AMD64 image build without publishing it.

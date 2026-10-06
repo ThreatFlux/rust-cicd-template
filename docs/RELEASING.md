@@ -114,7 +114,7 @@ A `v*` tag pushed by a maintainer triggers `release.yml` (auto-release dispatche
 | Build | Linux x86_64 (gnu and musl), Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (MSVC) |
 | Package | `.tar.gz` plus `.sha256` (Unix) and `.zip` (Windows), each holding the binary only |
 | SBOM | CycloneDX release SBOM (`<binary>-v<version>.cdx.json`) |
-| Publish | crates.io (if `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` is set; skipped for `-rc`-style versions and `prerelease` dispatches; a dry run only runs `cargo publish --dry-run`) |
+| Publish | crates.io through [trusted publishing](#cratesio-publishing): each crate version not yet on crates.io is published and versions already there are skipped; nothing is published for `-rc`-style versions, `prerelease` dispatches or when `CRATES_IO_PUBLISH` is `false`; a dry run only runs `cargo publish --dry-run` |
 | GitHub Release | Archives, Unix checksums and the release SBOM attached; a release that `release.yml` creates gets the matching `CHANGELOG.md` (root or `docs/`) section as its notes |
 
 The `docker.yml` workflow also runs for the tag (on a maintainer push, dispatched by auto-release, or dispatched by hand after a `release.yml` dispatch), producing:
@@ -128,12 +128,54 @@ The `docker.yml` workflow also runs for the tag (on a maintainer push, dispatche
 | Push | `ghcr.io/threatflux/<image>` and `docker.io/<namespace>/<image>` with semver tags (`1.2.3`, `1.2`, `1`) and the short SHA |
 | Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.99.0` (`base-rust-latest` on `main` only) |
 
+### crates.io Publishing
+
+The publish job uses [crates.io trusted publishing](https://crates.io/docs/trusted-publishing)
+and stores no registry secret. A real run requests `id-token: write`, runs in the `crates-io`
+environment, and [`rust-lang/crates-io-auth-action`](https://github.com/rust-lang/crates-io-auth-action)
+exchanges the job's GitHub OIDC token for a crates.io token that expires after 30 minutes and
+is revoked when the job ends. A failed publish fails the run. Dry runs use neither the
+environment nor a token.
+
+Set it up once per crate:
+
+1. Set the `CRATES_IO_PUBLISH` repository variable to `false` until the crate exists.
+   Trusted publishing only publishes new versions of an existing crate, and crates.io
+   rejects its tokens for a crate that has never been published.
+2. Publish the first version by hand from its release tag with your own crates.io API
+   token: `cargo publish --locked` (for a workspace, `-p <crate>` in
+   `RUST_TEMPLATE_PUBLISH_PACKAGES` order).
+3. On crates.io, open each crate's **Settings → Trusted Publishing**, choose **Add →
+   GitHub** and enter the repository owner, the repository name, workflow filename
+   `release.yml` and environment `crates-io`.
+4. In GitHub **Settings → Environments**, create `crates-io` and limit its deployment
+   branches and tags to `main` and tags matching `v*` (plus any release branch you
+   dispatch from); add required reviewers if releases need an approval. Without this,
+   the first real run creates the environment with no restrictions.
+5. Delete `CRATES_IO_PUBLISH` or set it to `true`. Once a release has published through
+   the workflow, consider enabling **Require trusted publishing for all new versions** in
+   the crate's crates.io settings so API tokens can no longer publish it.
+
+| `CRATES_IO_PUBLISH` | Real release | Dry run |
+|---------------------|--------------|---------|
+| unset or `true` | Publishes through trusted publishing | `cargo publish --dry-run` |
+| `false` | Skips crates.io and logs why | `cargo publish --dry-run` |
+| anything else | Fails the publish job | Fails the publish job |
+
+A repository that never publishes to crates.io (an application, or the
+`ThreatFlux/rust-cicd-template` repository itself) sets `CRATES_IO_PUBLISH=false`
+permanently:
+
+```bash
+gh variable set CRATES_IO_PUBLISH --repo OWNER/REPO --body false
+```
+
 ### Required Permissions
 
-| Secret | Holder | Purpose |
-|--------|--------|---------|
+| Secret or setting | Holder | Purpose |
+|-------------------|--------|---------|
 | `GITHUB_TOKEN` | Automatic | Tags, release assets, workflow dispatch, GHCR push |
-| `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` | Repo or org admin | crates.io publish; an org-level secret also counts |
+| crates.io trusted publisher and `crates-io` environment | Crate owner and repo admin | crates.io publish through OIDC; no registry token |
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Repo or org admin | Docker Hub push |
 
 ### Rollback
