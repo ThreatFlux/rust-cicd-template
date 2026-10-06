@@ -16,7 +16,7 @@
 # Build stages are IDENTICAL to Dockerfile; only the runtime stage differs.
 # Keep the two in sync — the conformance job checks both against the template.
 
-FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rust-base
+FROM rust:1.99.0-trixie@sha256:3745c050d12adc738eff16ebfc81ed044bfb2cc27c6828850ff1666beb1c7a49 AS rust-base
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
@@ -79,7 +79,7 @@ RUN mkdir -p /home/builder/out/bin /home/builder/out/doc \
     fi && \
     cp /build/sbom.cdx.json /home/builder/out/doc/sbom.cdx.json
 
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runtime
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runtime
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
