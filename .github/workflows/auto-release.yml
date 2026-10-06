@@ -321,6 +321,13 @@ jobs:
               if [[ -f Cargo.lock ]]; then
                 echo "- would update Cargo.lock if cargo check changes it"
               fi
+              # The notes Create Release would give the GitHub Release, from the
+              # same script and commit. The script logs their source on stderr.
+              python3 scripts/release_notes.py "${NEXT_VERSION}" --output "${RUNNER_TEMP}/release_notes.md"
+              echo "- would publish these release notes:"
+              echo
+              cat "${RUNNER_TEMP}/release_notes.md"
+              echo
             else
               echo "Dry run: would not release ${TARGET_SHA}."
             fi
@@ -370,21 +377,15 @@ jobs:
         env:
           VERSION: ${{ needs.check.outputs.next_version }}
 
-      - name: Generate changelog
+      # The CHANGELOG.md (root or docs/) section for the version when it has one,
+      # otherwise every commit since the previous release tag, grouped by type.
+      - name: Generate release notes
+        env:
+          VERSION: ${{ needs.check.outputs.next_version }}
         run: |
-          VERSION="${{ needs.check.outputs.next_version }}"
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          printf '## Release v%s\n\n' "$VERSION" > release_notes.md
-          if [ -n "$LAST_TAG" ]; then
-            FEATURES=$(git log "$LAST_TAG..HEAD" --grep="^feat" --pretty=format:"- %s (%h)" --no-merges)
-            if [ -n "$FEATURES" ]; then
-              printf '### Features\n%s\n\n' "$FEATURES" >> release_notes.md
-            fi
-            FIXES=$(git log "$LAST_TAG..HEAD" --grep="^fix" --pretty=format:"- %s (%h)" --no-merges)
-            if [ -n "$FIXES" ]; then
-              printf '### Bug Fixes\n%s\n\n' "$FIXES" >> release_notes.md
-            fi
-          fi
+          set -euo pipefail
+          python3 scripts/release_notes.py "${VERSION}" --output release_notes.md
+          cat release_notes.md
 
       # Minted right before the writes, so slow preparation cannot outlast the
       # token's one-hour lifetime. Limited to this repository and to

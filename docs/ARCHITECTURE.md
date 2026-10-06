@@ -59,6 +59,8 @@ flowchart TB
 
     subgraph Scripts["scripts/"]
         TP[check_template_placeholders.py]
+        RV[release_version.py]
+        RN[release_notes.py]
     end
 
     subgraph Docs["docs/"]
@@ -76,6 +78,8 @@ flowchart TB
     SEC -- pass --> AUTO
     AUTO --> REL
     TP --> MK
+    RV --> AUTO & REL
+    RN --> AUTO & REL
 ```
 
 ## Key Design Decisions

@@ -229,8 +229,13 @@ jobs:
         run: |
           mkdir dist
           Copy-Item "target/${{ matrix.target }}/release/${env:BINARY_NAME}.exe" dist/
-          Compress-Archive -Path dist/* -DestinationPath "${env:BINARY_NAME}-${{ matrix.artifact }}.zip"
-          Get-FileHash "${env:BINARY_NAME}-${{ matrix.artifact }}.zip" -Algorithm SHA256 | Format-List
+          $archive = "${env:BINARY_NAME}-${{ matrix.artifact }}.zip"
+          Compress-Archive -Path dist/* -DestinationPath $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          # The "<hash>  <file>" line shasum writes, with an LF ending, so
+          # `shasum -a 256 -c` and `sha256sum -c` verify it on any platform.
+          [System.IO.File]::WriteAllText((Join-Path $PWD "$archive.sha256"), "$hash  $archive`n")
+          Get-Content "$archive.sha256"
 
       - name: Upload artifacts (Unix)
         if: runner.os != 'Windows'
@@ -245,7 +250,10 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.artifact }}
-          path: "*.zip"
+          path: |
+            *.zip
+            *.zip.sha256
+          if-no-files-found: error
           retention-days: 5
 
   sbom:
@@ -297,41 +305,23 @@ jobs:
       # Create or update the GitHub release and upload its assets.
       contents: write
     steps:
+      # Full history and tags: without a changelog section, the notes list the
+      # commits since the previous release tag.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
+      # Used only when this run creates the release; Auto Release writes the same
+      # notes with the same script when it creates it.
       - name: Generate release notes
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          printf '## Release v%s\n\n' "${VERSION}" > release_notes.md
-          changelog=""
-          for candidate in CHANGELOG.md docs/CHANGELOG.md; do
-            if [[ -f "${candidate}" ]]; then
-              changelog="${candidate}"
-              break
-            fi
-          done
-          if [[ -z "${changelog}" ]]; then
-            exit 0
-          fi
-          # Body of the "## [VERSION]" section, up to the next "## " heading or the
-          # link reference definitions at the end of the file.
-          awk -v header="## [${VERSION}]" '
-            !found && index($0, header) == 1 { found = 1; next }
-            !found { next }
-            /^## / || /^\[.*\]: / { exit }
-            !started && /^[[:space:]]*$/ { next }
-            { started = 1; print }
-          ' "${changelog}" > changelog_section.md
-          if [[ -s changelog_section.md ]]; then
-            cat changelog_section.md >> release_notes.md
-          else
-            echo "See ${changelog} for details." >> release_notes.md
-          fi
+          python3 scripts/release_notes.py "${VERSION}" --output release_notes.md
+          cat release_notes.md
 
       - name: Create or update GitHub Release
         env:

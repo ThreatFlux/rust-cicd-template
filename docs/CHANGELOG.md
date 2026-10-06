@@ -28,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-06
+
+### Added
+
+- ARCHITECTURE.md with component map and design decision rationale
+- CHANGELOG.md following Keep a Changelog format
+- RELEASING.md with maintainer release runbook
+- FAQ.md covering common setup and customization questions
+- Expanded README_STANDARDS.md with comprehensive style guide
+- Mermaid CI/CD pipeline diagram in README.md
+- Table of contents and back-to-top navigation in all READMEs
+- Centered header blocks with badge rows and quick navigation links
+
 ### Changed
 
 - Refresh development Rust and both Docker builders to 1.99.0 while retaining the tested 1.97.1 MSRV.
@@ -44,21 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `auto-release.yml` gains a `dry_run` dispatch input: the check job reports the version it would release, the next action and the files the release commit would change, and Create Release is skipped. Dry runs use their own concurrency group, so they cannot cancel a real release run. Every run now logs the commits it counted and why it decided to release or not, stops before writing anything if the `Cargo.toml` version is not `MAJOR.MINOR.PATCH` or is lower than the latest `vX.Y.Z` tag, and passes dispatch inputs to its scripts through `env`.
 - `release.yml` now publishes to crates.io through trusted publishing: the publish job runs in the `crates-io` environment with `id-token: write`, and `rust-lang/crates-io-auth-action` (pinned to v1.0.5) exchanges the job's OIDC token for a short-lived crates.io token. The `CRATES_IO_TOKEN` and `CARGO_REGISTRY_TOKEN` secrets are no longer read, and a publish failure fails the run. Crate versions already on crates.io are skipped, so a re-run after a partial publish only publishes what is missing; a virtual workspace must list its crates in `RUST_TEMPLATE_PUBLISH_PACKAGES`. The new `CRATES_IO_PUBLISH` repository variable skips crates.io when set to `false` (dry runs still run `cargo publish --dry-run`); this template repository sets it, because its releases must not publish a `rust-cicd-template` crate. Dry runs use neither the environment nor a token.
 - Auto Release can cut releases with a GitHub App: when the `RUST_TEMPLATE_RELEASE_APP_ID` variable and `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` secret (or, when neither is set, the ThreatFlux organization's `TF_AUTOMATION_APP_ID` and `TF_AUTOMATION_APP_PRIVATE_KEY`) are set, `actions/create-github-app-token` (pinned to v3.2.0) mints a repository-scoped `contents: write` token just before the writes; it pushes the release commit and tag as the App's bot user and creates the GitHub Release. That tag push starts `release.yml` and `docker.yml` through their tag triggers, so the explicit dispatch is skipped and the run logs why; without an App, `GITHUB_TOKEN` and the dispatch are used as before. The two pairs are never mixed, a pair with only one value set fails the run before anything is written, and a dry run mints the App token too, so a rehearsal proves the App configuration and reports which token a release would use. The release job's checkout no longer persists credentials, so `cargo check` runs without a write token in `.git/config`; only the push step passes one to git.
-
-
-### Added
-
-- ARCHITECTURE.md with component map and design decision rationale
-- CHANGELOG.md following Keep a Changelog format
-- RELEASING.md with maintainer release runbook
-- FAQ.md covering common setup and customization questions
-- Expanded README_STANDARDS.md with comprehensive style guide
-- Mermaid CI/CD pipeline diagram in README.md
-- Table of contents and back-to-top navigation in all READMEs
-- Centered header blocks with badge rows and quick navigation links
-
-### Changed
-
+- Release notes come from the new `scripts/release_notes.py`, which Auto Release and `release.yml` both run: the `## [VERSION]` section of `CHANGELOG.md` or `docs/CHANGELOG.md` when there is one, otherwise every commit since the previous release tag, grouped into breaking changes, features, bug fixes and other changes, then a "Full Changelog" compare link. Auto Release used to list only `feat` and `fix` commits, so a release without them had an empty body, and `release.yml` used to fall back to a bare "See CHANGELOG.md for details" line. An Auto Release dry run now prints the notes it would publish.
+- The Windows release archive now gets a `.zip.sha256` checksum file in the same `shasum -a 256 -c` format as the Unix archives; `release.yml` previously only printed its hash in the build log.
 - Reframed project identity from "CI/CD Template" to "Rust Project Template"
 - Reorganized README.md configuration section into structured tables
 - Updated README_TEMPLATE.md to inherit all structural best practices
@@ -85,5 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bootstrap checklist and README standards documentation
 - Rust 2024 edition default with 1.96.0 MSRV baseline
 
-[Unreleased]: https://github.com/ThreatFlux/rust-cicd-template/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ThreatFlux/rust-cicd-template/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/ThreatFlux/rust-cicd-template/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ThreatFlux/rust-cicd-template/releases/tag/v0.5.0
