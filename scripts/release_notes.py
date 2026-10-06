@@ -17,8 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shutil
-# Only runs git with an argument list, never a shell.
+# B404: git is run as an argument list, never through a shell.
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
@@ -37,13 +36,10 @@ SECTIONS = (
 
 
 def git(*args: str) -> str:
-    executable = shutil.which("git")
-    if executable is None:
-        raise SystemExit("git is not on PATH")
-    # An argument list, no shell: the arguments are fixed git options plus tag
-    # names and revisions that git itself listed.
-    return subprocess.run(  # nosec B603
-        [executable, *args], check=True, capture_output=True, text=True, encoding="utf-8"
+    # B603/B607: git from PATH, as on every runner, with fixed subcommands and
+    # options plus tag names and revisions that git itself listed; no shell.
+    return subprocess.run(  # nosec B603, B607
+        ["git", *args], check=True, capture_output=True, text=True, encoding="utf-8", shell=False
     ).stdout
 
 
