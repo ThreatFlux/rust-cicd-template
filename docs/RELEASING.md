@@ -28,9 +28,25 @@ Releases are driven by [Conventional Commits](https://www.conventionalcommits.or
 3. Commits the version bump, creates a new Git tag (`v*`), and creates the GitHub Release with generated notes.
 4. Dispatches `release.yml` (build, package, SBOM, crates.io) and `docker.yml` (image build, scan, sign, SBOM) for that tag. Tags pushed with the workflow `GITHUB_TOKEN` do not trigger other workflows on their own, so this explicit dispatch is required.
 
-Auto Release starts in three ways: when a CI or Security run completes, on its weekly schedule, and by manual dispatch. For completed runs it reacts only to successful `push` runs on this repository's `main`, never to pull-request runs (including fork pull requests from a branch named `main`). Completed-run and scheduled triggers evaluate the current tip of `main` and release only when CI and Security have both succeeded on a push for that exact commit. A manual dispatch skips that check and releases with the bump type you choose. Its workflow token is read-only except in the job that pushes the release commit and tag, creates the GitHub Release and dispatches the tag workflows.
+Auto Release starts in three ways: when a CI or Security run completes, on its weekly schedule, and by manual dispatch. For completed runs it reacts only to successful `push` runs on this repository's `main`, never to pull-request runs (including fork pull requests from a branch named `main`). Completed-run and scheduled triggers evaluate the current tip of `main` and release only when CI and Security have both succeeded on a push for that exact commit. A manual dispatch skips that check and releases with the bump type you choose, unless it is a [dry run](#rehearse-auto-release). Every run stops before writing anything if the `Cargo.toml` version is lower than the latest `vX.Y.Z` tag. Its workflow token is read-only except in the job that pushes the release commit and tag, creates the GitHub Release and dispatches the tag workflows.
 
 **No manual steps are required for routine releases.**
+
+### Rehearse Auto Release
+
+To see what Auto Release would do without committing, tagging, creating a GitHub Release
+or dispatching the tag workflows, dispatch it with `dry_run`:
+
+```bash
+gh workflow run auto-release.yml --ref main -f version_bump=patch -f dry_run=true
+```
+
+The Check for Release job logs the commits since the last tag, the decision an automatic
+run would make and why, and the version this dispatch would release. Its Report dry run
+step, also shown in the run summary, names the next action, lists the files the release
+commit would change and ends with "nothing was written to the repository". On a ref whose
+head is not the tip of `main`, it reports that Create Release would skip the run as stale
+instead. Create Release is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
 
 ## Manual Release
 

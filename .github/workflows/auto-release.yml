@@ -1,9 +1,10 @@
 name: Auto Release
 
 # Key on the head repository too, so a fork PR whose branch is named "main"
-# cannot cancel an in-progress release run for this repository's main.
+# cannot cancel an in-progress release run for this repository's main. Dry runs
+# get their own group, so a rehearsal can never cancel a real release run.
 concurrency:
-  group: auto-release-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}
+  group: auto-release-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: true
 
 on:
@@ -24,6 +25,11 @@ on:
           - patch
           - minor
           - major
+      dry_run:
+        description: Report the version and the release steps without committing, tagging, releasing or dispatching
+        required: false
+        default: false
+        type: boolean
 
 # Read-only by default; only the release job gets write scopes.
 permissions:
@@ -32,6 +38,7 @@ permissions:
 env:
   RUST_VERSION: 1.99.0
   RUSTUP_TOOLCHAIN: 1.99.0
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
 
 jobs:
   check:
@@ -80,22 +87,28 @@ jobs:
 
       - name: Check CI status
         id: ci_status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
-          TARGET_SHA="${{ steps.target.outputs.sha }}"
           CI_STATUS=$(gh run list --workflow=ci.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
           SECURITY_STATUS=$(gh run list --workflow=security.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
+          echo "Push run conclusions for ${TARGET_SHA}: CI '${CI_STATUS}', Security '${SECURITY_STATUS}' (empty: no push run has completed)"
           if [[ "$CI_STATUS" == "success" ]] && [[ "$SECURITY_STATUS" == "success" ]]; then
             echo "all_passed=true" >> "$GITHUB_OUTPUT"
           else
             echo "all_passed=false" >> "$GITHUB_OUTPUT"
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for changes
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CI_PASSED: ${{ steps.ci_status.outputs.all_passed }}
         run: |
+          set -euo pipefail
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          SINCE="${LAST_TAG:-the first commit}"
           if [ -z "$LAST_TAG" ]; then
             LAST_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
@@ -106,34 +119,61 @@ jobs:
           BREAKING_BODY_COUNT=$(git log "$LAST_TAG..HEAD" --grep="BREAKING CHANGE" --oneline | wc -l)
           BREAKING_SUBJECT_COUNT=$(git log "$LAST_TAG..HEAD" --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
           BREAKING_COUNT=$((BREAKING_BODY_COUNT + BREAKING_SUBJECT_COUNT))
+          echo "Commits since ${SINCE}: ${CHANGES} (feat: ${FEAT_COUNT}, fix: ${FIX_COUNT}, breaking: ${BREAKING_COUNT})"
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ steps.ci_status.outputs.all_passed }}" != "true" ]]; then
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          # What a completed-run or scheduled trigger decides for this commit.
+          if [[ "${CI_PASSED}" != "true" ]]; then
+            AUTOMATIC=false
+            REASON="CI and Security have not both succeeded on a push of this commit"
           elif [[ $CHANGES -eq 0 ]]; then
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            AUTOMATIC=false
+            REASON="there are no commits since ${SINCE}"
           elif [[ $BREAKING_COUNT -gt 0 ]] || [[ $FEAT_COUNT -gt 0 ]] || [[ $FIX_COUNT -gt 0 ]]; then
+            AUTOMATIC=true
+            REASON="there are feat, fix or breaking commits since ${SINCE}"
+          else
+            AUTOMATIC=false
+            REASON="no commit since ${SINCE} is a feat, fix or breaking change"
+          fi
+
+          if [[ "$AUTOMATIC" == "true" ]]; then
+            DECISION="release"
+          else
+            DECISION="no release"
+          fi
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "Decision: release (manual dispatch). An automatic run would decide: ${DECISION}, because ${REASON}."
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           else
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Decision: ${DECISION}, because ${REASON}."
+            echo "should_release=${AUTOMATIC}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Determine version
         id: version
         if: steps.check.outputs.should_release == 'true'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_BUMP: ${{ github.event.inputs.version_bump }}
         run: |
+          set -euo pipefail
           CURRENT_VERSION="$(python3 scripts/release_version.py current)"
+          if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Cargo.toml version ${CURRENT_VERSION} is not MAJOR.MINOR.PATCH; release pre-release versions by hand (see docs/RELEASING.md)."
+            exit 1
+          fi
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            BUMP_TYPE="${{ github.event.inputs.version_bump }}"
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BUMP_TYPE="${REQUESTED_BUMP}"
+            BUMP_SOURCE="chosen in the dispatch"
           else
             LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            BUMP_SOURCE="from the commits since ${LAST_TAG:-the first commit}"
             if [ -z "$LAST_TAG" ]; then
-            LAST_TAG=$(git rev-list --max-parents=0 HEAD)
-          fi
+              LAST_TAG=$(git rev-list --max-parents=0 HEAD)
+            fi
 
             BREAKING_BODY=$(git log "$LAST_TAG..HEAD" --grep="BREAKING CHANGE" --oneline | wc -l)
             BREAKING_SUBJECT=$(git log "$LAST_TAG..HEAD" --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
@@ -153,14 +193,61 @@ jobs:
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
             minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
             patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::Unknown version bump '${BUMP_TYPE}'"; exit 1 ;;
           esac
+          NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
 
-          echo "next_version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
+          # Stop before the release job writes anything if the manifest is behind
+          # the latest release tag: the bump would land at or below a version that
+          # is already tagged, and the tag push would fail after main had moved.
+          LATEST_TAG=$(git tag --list 'v[0-9]*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
+          if [[ -n "$LATEST_TAG" ]] && [[ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "${LATEST_TAG#v}" | sort -V | tail -n 1)" != "$CURRENT_VERSION" ]]; then
+            echo "::error::Cargo.toml version ${CURRENT_VERSION} is lower than the latest release tag ${LATEST_TAG}. Set the manifest version to ${LATEST_TAG#v}, then re-run."
+            exit 1
+          fi
+
+          echo "Version: ${CURRENT_VERSION} -> ${NEXT_VERSION} (${BUMP_TYPE} bump ${BUMP_SOURCE})"
+          echo "next_version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Report dry run
+        if: env.DRY_RUN == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHOULD_RELEASE: ${{ steps.check.outputs.should_release }}
+          CURRENT_VERSION: ${{ steps.version.outputs.current_version }}
+          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # Create Release skips any target that is not the current tip of main.
+          MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          {
+            if [[ "$SHOULD_RELEASE" == "true" ]] && [[ "$MAIN_SHA" != "$TARGET_SHA" ]]; then
+              echo "Dry run: would not release v${NEXT_VERSION}: ${TARGET_SHA} is not the tip of main (${MAIN_SHA}), so Create Release would skip it as stale."
+            elif [[ "$SHOULD_RELEASE" == "true" ]]; then
+              TAG="v${NEXT_VERSION}"
+              # Bump this read-only checkout only to list the files a release would commit.
+              python3 scripts/release_version.py set "$NEXT_VERSION"
+              echo "Dry run: would release ${TAG} (${CURRENT_VERSION} -> ${NEXT_VERSION}) from ${TARGET_SHA}."
+              echo "- next action: commit \"chore: release ${TAG}\" to main, push the annotated tag ${TAG}, create its GitHub Release and dispatch release.yml and docker.yml for ${TAG}"
+              git diff --name-only | while IFS= read -r file; do
+                echo "- would update ${file}"
+              done
+              git checkout -- .
+              if [[ -f Cargo.lock ]]; then
+                echo "- would update Cargo.lock if cargo check changes it"
+              fi
+            else
+              echo "Dry run: would not release ${TARGET_SHA}."
+            fi
+            echo "- nothing was written to the repository: no commit, tag, GitHub Release or workflow dispatch"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Create Release
     needs: check
-    if: needs.check.outputs.should_release == 'true'
+    # A dry run ends after the check job has reported what it would release.
+    if: needs.check.outputs.should_release == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     permissions:
       # Push the release commit and tag, and create the GitHub release.
