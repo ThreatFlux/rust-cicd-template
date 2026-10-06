@@ -69,9 +69,12 @@ Use this when the automated flow is insufficient (e.g., pre-release versions, ho
    gh workflow run docker.yml --ref v1.2.3   # once the tag exists
    ```
 
-   `release.yml` always builds, tags and publishes the commit at the `--ref` it was
-   dispatched on (a branch head or an existing tag); to release from a release branch,
-   dispatch on that branch.
+   `release.yml` always builds the commit at the `--ref` it was dispatched on (a branch
+   head or an existing tag). A real run makes sure the release tag points at that commit,
+   creates or updates the GitHub Release, and publishes to crates.io under the rules in
+   [What Happens Next](#what-happens-next). A [dry run](#dry-run) skips the tag and the
+   GitHub Release and only runs `cargo publish --dry-run`. To release from a release
+   branch, dispatch on that branch.
 
 ### Dry Run
 
