@@ -67,7 +67,13 @@ See the [Configuration Reference](../README.md#configuration-reference) for deta
 
 ### How do I skip crates.io publishing?
 
-Don't set the `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` secret. The release workflow will skip the publish step if neither secret is available.
+Set the `CRATES_IO_PUBLISH` repository variable to `false`:
+
+```bash
+gh variable set CRATES_IO_PUBLISH --repo OWNER/REPO --body false
+```
+
+Real releases then skip crates.io and log why; `release.yml` dry runs still run `cargo publish --dry-run`. Unset or `true` publishes through crates.io trusted publishing, which needs no registry secret. See [RELEASING.md](RELEASING.md#cratesio-publishing) for the one-time crates.io setup.
 
 ### How do I use custom CI runners?
 
