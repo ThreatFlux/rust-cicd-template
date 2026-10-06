@@ -1,7 +1,9 @@
 name: Release
 
+# Read-only by default; jobs that create the tag or the GitHub release request
+# contents: write explicitly.
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -44,15 +46,20 @@ jobs:
   prepare:
     name: Prepare Release
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    permissions:
+      # Manual dispatches create the release tag through the API.
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       source_ref: ${{ steps.release_ref.outputs.source_ref }}
     steps:
       - name: Determine source ref
         id: source_ref
+        env:
+          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.source_ref }}" ]]; then
-            SOURCE_REF="${{ github.event.inputs.source_ref }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${INPUT_SOURCE_REF}" ]]; then
+            SOURCE_REF="${INPUT_SOURCE_REF}"
           else
             SOURCE_REF="${GITHUB_REF}"
           fi
@@ -67,9 +74,11 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="${INPUT_VERSION}"
           else
             VERSION=${GITHUB_REF#refs/tags/v}
           fi
@@ -303,6 +312,9 @@ jobs:
     needs: [prepare, build, sbom]
     if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    permissions:
+      # Create or update the GitHub release and upload its assets.
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
