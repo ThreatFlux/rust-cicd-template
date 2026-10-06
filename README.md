@@ -255,8 +255,9 @@ build ARG supplied by `docker.yml` from repository variables — so customize by
 variable, never by editing the Dockerfile. A CI conformance job diffs each repo's copy
 against this one; a fork will fail it.
 
-The runtime is distroless (`gcr.io/distroless/cc-debian12:nonroot`, uid 65532, no shell or
-package manager), and all base images are digest-pinned. Dependabot refreshes each
+The runtime is distroless (`gcr.io/distroless/cc-debian13:nonroot`, uid 65532, no shell or
+package manager), built from the Debian 13 (trixie) Rust image so the binary's glibc matches
+the runtime, and all base images are digest-pinned. Dependabot refreshes each
 Dockerfile's first `FROM` (the Rust builder); maintainers refresh the later runtime digest
 with the `docker buildx imagetools inspect` command documented in the Dockerfiles.
 
