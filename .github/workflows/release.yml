@@ -85,16 +85,18 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Validate version format
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
             echo "Invalid version format: $VERSION"
             exit 1
           fi
 
       - name: Validate manifest version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           CURRENT_VERSION="$(python3 scripts/release_version.py current)"
           if [[ "${CURRENT_VERSION}" != "${VERSION}" ]]; then
             echo "Cargo manifest version ${CURRENT_VERSION} does not match release version ${VERSION}"
@@ -105,11 +107,11 @@ jobs:
         id: release_ref
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TARGET_REF: ${{ steps.source_ref.outputs.source_ref }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
           TAG="v${VERSION}"
-          TARGET_REF="${{ steps.source_ref.outputs.source_ref }}"
           TARGET_SHA="$(git rev-parse "${TARGET_REF}^{commit}")"
 
           if [[ "${DRY_RUN}" == "true" ]]; then
@@ -295,9 +297,10 @@ jobs:
           tool: cargo-cyclonedx@0.5.9
 
       - name: Generate SBOM files
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           make sbom BINARY_NAME="${BINARY_NAME}" SBOM_MANIFEST_PATH="${SBOM_MANIFEST_PATH}"
-          VERSION="${{ needs.prepare.outputs.version }}"
           mv "sbom/${BINARY_NAME}-sbom.json" "sbom/${BINARY_NAME}-v${VERSION}.cdx.json"
 
       - name: Upload SBOM artifacts
@@ -356,8 +359,8 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
           TAG="v${VERSION}"
           TITLE="Release v${VERSION}"
           IS_PRERELEASE="false"
@@ -389,11 +392,12 @@ jobs:
         run: |
           for file in artifacts/**/*; do
             if [ -f "$file" ]; then
-              gh release upload "v${{ needs.prepare.outputs.version }}" "$file" --clobber
+              gh release upload "v${VERSION}" "$file" --clobber
             fi
           done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
 
   publish:
     name: Publish to crates.io
@@ -441,8 +445,9 @@ jobs:
       - name: Check crates.io token
         id: check_token
         if: env.DRY_RUN != 'true'
+        env:
+          TOKEN: ${{ secrets.CRATES_IO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          TOKEN="${{ secrets.CRATES_IO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}"
           if [ -n "$TOKEN" ]; then
             echo "has_token=true" >> "$GITHUB_OUTPUT"
           else
@@ -454,9 +459,9 @@ jobs:
         if: steps.check_token.outputs.has_token == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          VERSION="${{ needs.prepare.outputs.version }}"
           if [[ -n "${PUBLISH_PACKAGES}" ]]; then
             for package in ${PUBLISH_PACKAGES}; do
               cargo publish -p "${package}" --locked
