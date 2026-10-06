@@ -36,6 +36,7 @@ SECTIONS = (
 
 
 def git(*args: str) -> str:
+    """Run git with ARGS in the current directory and return its standard output."""
     # B603/B607: git from PATH, as on every runner, with fixed subcommands and
     # options plus tag names and revisions that git itself listed; no shell.
     return subprocess.run(  # nosec B603, B607
@@ -44,6 +45,7 @@ def git(*args: str) -> str:
 
 
 def version_key(version: str) -> tuple[int, int, int] | None:
+    """(MAJOR, MINOR, PATCH) of a MAJOR.MINOR.PATCH version, or None for any other string."""
     match = TAG_PATTERN.match(f"v{version}")
     if not match:
         return None
@@ -117,6 +119,7 @@ def commit_list(since: str | None) -> tuple[int, str]:
 
 
 def main() -> int:
+    """Write the notes for the version on the command line and log where they came from."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("version", help="version being released, without the leading v")
     parser.add_argument("--output", type=Path, help="write the notes here instead of stdout")
