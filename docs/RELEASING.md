@@ -76,8 +76,9 @@ dispatch `release.yml` with `dry_run` enabled and the current manifest version:
 gh workflow run release.yml --ref main -f version="$(python3 scripts/release_version.py current)" -f dry_run=true
 ```
 
-This runs every build target, packaging, the release SBOM and `cargo publish --dry-run`;
-artifacts are kept on the workflow run only.
+This runs every build target, packaging, the release SBOM and `cargo publish --dry-run`,
+including when `prerelease` is set or the version has a suffix; artifacts are kept on the
+workflow run only.
 
 ### What Happens Next
 
@@ -88,8 +89,8 @@ A `v*` tag pushed by a maintainer triggers `release.yml` (auto-release dispatche
 | Build | Linux x86_64 (gnu and musl), Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (MSVC) |
 | Package | `.tar.gz` plus `.sha256` (Unix) and `.zip` (Windows), each holding the binary only |
 | SBOM | CycloneDX release SBOM (`<binary>-v<version>.cdx.json`) |
-| Publish | crates.io (if `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` is set; skipped for `-rc`-style versions and `prerelease` dispatches) |
-| GitHub Release | Archives, Unix checksums and the release SBOM attached |
+| Publish | crates.io (if `CRATES_IO_TOKEN` or `CARGO_REGISTRY_TOKEN` is set; skipped for `-rc`-style versions and `prerelease` dispatches; a dry run only runs `cargo publish --dry-run`) |
+| GitHub Release | Archives, Unix checksums and the release SBOM attached; a release that `release.yml` creates gets the matching `CHANGELOG.md` (root or `docs/`) section as its notes |
 
 The `docker.yml` workflow also runs for the tag (on a maintainer push, dispatched by auto-release, or dispatched by hand after a `release.yml` dispatch), producing:
 

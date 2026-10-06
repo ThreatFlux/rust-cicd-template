@@ -311,12 +311,34 @@ jobs:
           ref: ${{ needs.prepare.outputs.source_ref }}
 
       - name: Generate release notes
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          echo "## Release v$VERSION" > release_notes.md
-          echo "" >> release_notes.md
-          if [ -f CHANGELOG.md ]; then
-            awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | sed '1d;$d' >> release_notes.md 2>/dev/null || echo "See CHANGELOG.md for details" >> release_notes.md
+          set -euo pipefail
+          printf '## Release v%s\n\n' "${VERSION}" > release_notes.md
+          changelog=""
+          for candidate in CHANGELOG.md docs/CHANGELOG.md; do
+            if [[ -f "${candidate}" ]]; then
+              changelog="${candidate}"
+              break
+            fi
+          done
+          if [[ -z "${changelog}" ]]; then
+            exit 0
+          fi
+          # Body of the "## [VERSION]" section, up to the next "## " heading or the
+          # link reference definitions at the end of the file.
+          awk -v header="## [${VERSION}]" '
+            !found && index($0, header) == 1 { found = 1; next }
+            !found { next }
+            /^## / || /^\[.*\]: / { exit }
+            !started && /^[[:space:]]*$/ { next }
+            { started = 1; print }
+          ' "${changelog}" > changelog_section.md
+          if [[ -s changelog_section.md ]]; then
+            cat changelog_section.md >> release_notes.md
+          else
+            echo "See ${changelog} for details." >> release_notes.md
           fi
 
       - name: Create or update GitHub Release
@@ -365,8 +387,12 @@ jobs:
     name: Publish to crates.io
     needs: [prepare, build]
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    # Skip pre-releases: a version suffix (1.2.3-rc1) or the prerelease dispatch input.
-    if: "!contains(needs.prepare.outputs.version, '-') && !(github.event_name == 'workflow_dispatch' && inputs.prerelease)"
+    # Real publishes skip pre-releases (a version suffix such as 1.2.3-rc1, or the
+    # prerelease dispatch input). A dry run always runs `cargo publish --dry-run`.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
+      (!contains(needs.prepare.outputs.version, '-') &&
+      !(github.event_name == 'workflow_dispatch' && inputs.prerelease))
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
