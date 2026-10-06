@@ -93,7 +93,7 @@ jobs:
         run: |
           CI_STATUS=$(gh run list --workflow=ci.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
           SECURITY_STATUS=$(gh run list --workflow=security.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
-          echo "Push runs on ${TARGET_SHA}: CI ${CI_STATUS:-not finished}, Security ${SECURITY_STATUS:-not finished}"
+          echo "Push run conclusions for ${TARGET_SHA}: CI '${CI_STATUS}', Security '${SECURITY_STATUS}' (empty: no push run has completed)"
           if [[ "$CI_STATUS" == "success" ]] && [[ "$SECURITY_STATUS" == "success" ]]; then
             echo "all_passed=true" >> "$GITHUB_OUTPUT"
           else
