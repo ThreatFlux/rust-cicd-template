@@ -393,10 +393,10 @@ jobs:
     environment:
       name: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && vars.CRATES_IO_PUBLISH != 'false' && 'crates-io' || '' }}
     permissions:
-      contents: read
+      contents: read # Check out the release source.
       # crates-io-auth-action exchanges the job's OIDC token for a short-lived
-      # crates.io publish token (trusted publishing); no registry secret is used.
-      id-token: write
+      # crates.io token (trusted publishing); no registry secret is used.
+      id-token: write # OIDC token for crates.io trusted publishing.
     env:
       # Unset or "true" publishes; "false" skips crates.io for this repository.
       CRATES_IO_PUBLISH: ${{ vars.CRATES_IO_PUBLISH }}
@@ -542,13 +542,19 @@ jobs:
             version="${spec#*@}"
             cargo publish --locked -p "${package}"
             # Wait until crates.io serves the new version before publishing
-            # crates that depend on it.
+            # crates that depend on it; a version it never serves fails the run.
+            served=false
             for _ in $(seq 1 20); do
               if curl --fail --silent --show-error --location \
                 --user-agent "${GITHUB_REPOSITORY} release workflow (https://github.com/${GITHUB_REPOSITORY})" \
                 --output /dev/null "https://crates.io/api/v1/crates/${package}/${version}"; then
+                served=true
                 break
               fi
               sleep 15
             done
+            if [[ "${served}" != "true" ]]; then
+              echo "::error::crates.io did not serve ${spec} within 5 minutes of publishing it"
+              exit 1
+            fi
           done
