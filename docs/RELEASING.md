@@ -30,25 +30,31 @@ Releases are driven by [Conventional Commits](https://www.conventionalcommits.or
 
 Auto Release starts in three ways: when a CI or Security run completes, on its weekly schedule, and by manual dispatch. For completed runs it reacts only to successful `push` runs on this repository's `main`, never to pull-request runs (including fork pull requests from a branch named `main`). Completed-run and scheduled triggers evaluate the current tip of `main` and release only when CI and Security have both succeeded on a push for that exact commit. A manual dispatch skips that check and releases with the bump type you choose, unless it is a [dry run](#rehearse-auto-release). Every run stops before writing anything if the `Cargo.toml` version is lower than the latest `vX.Y.Z` tag. Its workflow token is read-only except in the job that pushes the release commit and tag, creates the GitHub Release and dispatches the tag workflows.
 
+**No manual steps are required for routine releases.**
+
 ### Release Token
 
 Auto Release writes the release commit, the tag and the GitHub Release with a GitHub App
 installation token when one is configured, and with the workflow `GITHUB_TOKEN` otherwise.
-Configure both values of one pair, or neither:
+It uses the first pair below that has any value set, and that pair must have both:
 
-| Repository setting | Fallback (ThreatFlux org) | Value |
-|--------------------|---------------------------|-------|
-| Variable `RUST_TEMPLATE_RELEASE_APP_ID` | Variable `TF_AUTOMATION_APP_ID` | The App's ID or client ID |
-| Secret `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` | Secret `TF_AUTOMATION_APP_PRIVATE_KEY` | A private key of that App |
+| Pair | App ID or client ID (variable) | Private key (secret) |
+|------|--------------------------------|----------------------|
+| Repository | `RUST_TEMPLATE_RELEASE_APP_ID` | `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` |
+| ThreatFlux organization | `TF_AUTOMATION_APP_ID` | `TF_AUTOMATION_APP_PRIVATE_KEY` |
+| Neither set | `GITHUB_TOKEN` fallback | |
 
-The `RUST_TEMPLATE_RELEASE_APP_*` names take precedence; the `TF_AUTOMATION_APP_*` names
-let ThreatFlux repositories use the organization's automation App without per-repository
-setup. If only one value of the pair is set, Auto Release fails before writing anything
-instead of silently falling back.
+The organization pair lets ThreatFlux repositories use the organization's automation App
+without per-repository setup; a repository pair overrides it. The pairs are never mixed: a
+pair with only one value set fails the run before anything is written, instead of
+borrowing the other pair's value or silently falling back to `GITHUB_TOKEN`.
 
-The App needs **Contents: read and write** on the repository, and the token is limited to
-this repository and that permission. If `main` is protected, allow the App to push to it
-(for example as a ruleset bypass actor). With the App:
+The App needs **Contents: read and write** on the repository. Its token is limited to this
+repository and that permission, and is minted just before the release commit is pushed.
+The release job's checkout keeps no credentials, so `cargo check` never sees a write
+token; only the step that pushes the commit and tag passes one to git. If `main` is
+protected, allow the App to push to it (for example as a ruleset bypass actor). With the
+App:
 
 - the release commit and tag are pushed by `<app-slug>[bot]`, so the tag push starts
   `release.yml` and `docker.yml` by itself and Auto Release dispatches nothing
@@ -60,8 +66,6 @@ Without the App, releases work as before: `GITHUB_TOKEN` pushes the commit and t
 Auto Release dispatches `release.yml` and `docker.yml` on the new tag. A [dry
 run](#rehearse-auto-release) mints the App token too, so it proves the configuration
 before a real release needs it.
-
-**No manual steps are required for routine releases.**
 
 ### Rehearse Auto Release
 
@@ -79,9 +83,8 @@ be revoked unused, so a misconfigured App ID, key or installation fails the dry 
 Report dry run step, also shown in the run summary, names the release token, the next
 action (including whether `release.yml` and `docker.yml` would be dispatched or started by
 the tag push), lists the files the release commit would change and ends with "nothing was
-written to the repository". On a ref whose
-head is not the tip of `main`, it reports that Create Release would skip the run as stale
-instead. Create Release is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
+written to the repository". On a ref whose head is not the tip of `main`, it reports that
+Create Release would skip the run as stale instead. Create Release is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
 
 ## Manual Release
 

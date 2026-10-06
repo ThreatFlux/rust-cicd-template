@@ -58,8 +58,8 @@ install an App with **Contents: read and write** on the repository and set both:
 - secret `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY`: a private key of that App
 
 ThreatFlux repositories that can see the organization's `TF_AUTOMATION_APP_ID` variable and
-`TF_AUTOMATION_APP_PRIVATE_KEY` secret use that App without either setting. Set both values
-or neither, then rehearse with
+`TF_AUTOMATION_APP_PRIVATE_KEY` secret use that App when neither repository value is set.
+Set both values of a pair or neither (a half-set pair fails the run), then rehearse with
 `gh workflow run auto-release.yml --ref main -f version_bump=patch -f dry_run=true`.
 [RELEASING.md](RELEASING.md#release-token) has the details.
 

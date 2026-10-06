@@ -9,10 +9,11 @@ name: Auto Release
 # - GITHUB_TOKEN (fallback, no App configured): a tag pushed with GITHUB_TOKEN
 #   starts no workflows, so Create Release dispatches release.yml and docker.yml
 #   for the new tag.
-# The App is read from the repository variable RUST_TEMPLATE_RELEASE_APP_ID and
-# secret RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY, falling back to the ThreatFlux
-# organization's TF_AUTOMATION_APP_ID and TF_AUTOMATION_APP_PRIVATE_KEY. See
-# docs/RELEASING.md#release-token.
+# The App is the repository pair (variable RUST_TEMPLATE_RELEASE_APP_ID and
+# secret RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY) when either of them is set, and
+# otherwise the ThreatFlux organization pair (TF_AUTOMATION_APP_ID and
+# TF_AUTOMATION_APP_PRIVATE_KEY). The two pairs are never mixed, and a pair with
+# only one value set fails the run. See docs/RELEASING.md#release-token.
 
 # Key on the head repository too, so a fork PR whose branch is named "main"
 # cannot cancel an in-progress release run for this repository's main. Dry runs
@@ -53,8 +54,6 @@ env:
   RUST_VERSION: 1.99.0
   RUSTUP_TOOLCHAIN: 1.99.0
   DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
-  # GitHub App ID or client ID that cuts releases; empty means GITHUB_TOKEN.
-  RELEASE_APP_ID: ${{ vars.RUST_TEMPLATE_RELEASE_APP_ID || vars.TF_AUTOMATION_APP_ID || '' }}
 
 jobs:
   check:
@@ -73,11 +72,11 @@ jobs:
     permissions:
       contents: read
       actions: read
-    env:
-      # Step-level `if:` cannot read `secrets`, so expose only whether a key is set.
-      HAS_RELEASE_APP_KEY: ${{ (secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY) != '' }}
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
+      release_app: ${{ steps.release_app.outputs.use_app }}
+      release_app_source: ${{ steps.release_app.outputs.source }}
+      release_app_id: ${{ steps.release_app.outputs.app_id }}
       next_version: ${{ steps.version.outputs.next_version }}
       current_version: ${{ steps.version.outputs.current_version }}
       target_sha: ${{ steps.target.outputs.sha }}
@@ -228,30 +227,60 @@ jobs:
           echo "Version: ${CURRENT_VERSION} -> ${NEXT_VERSION} (${BUMP_TYPE} bump ${BUMP_SOURCE})"
           echo "next_version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
 
-      # Checked before Create Release can start, and in every dry run, so a
-      # half-configured App never silently falls back to GITHUB_TOKEN.
-      - name: Validate GitHub App configuration
+      # Decided before Create Release can start, and in every dry run. The
+      # repository pair wins when either of its values is set, so it is never
+      # mixed with the organization pair, and a pair with only one value set
+      # fails here instead of silently falling back to GITHUB_TOKEN.
+      - name: Select release token
+        id: release_app
         if: env.DRY_RUN == 'true' || steps.check.outputs.should_release == 'true'
+        env:
+          REPOSITORY_APP_ID: ${{ vars.RUST_TEMPLATE_RELEASE_APP_ID }}
+          HAS_REPOSITORY_APP_KEY: ${{ secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY != '' }}
+          ORGANIZATION_APP_ID: ${{ vars.TF_AUTOMATION_APP_ID }}
+          HAS_ORGANIZATION_APP_KEY: ${{ secrets.TF_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
-          if [[ -n "${RELEASE_APP_ID}" ]] && [[ "${HAS_RELEASE_APP_KEY}" == "true" ]]; then
-            echo "Release token: GitHub App ${RELEASE_APP_ID}"
-          elif [[ -z "${RELEASE_APP_ID}" ]] && [[ "${HAS_RELEASE_APP_KEY}" != "true" ]]; then
-            echo "Release token: GITHUB_TOKEN (no GitHub App configured)"
+          set -euo pipefail
+          if [[ -n "${REPOSITORY_APP_ID}" || "${HAS_REPOSITORY_APP_KEY}" == "true" ]]; then
+            SOURCE="repository"
+            PAIR="variable RUST_TEMPLATE_RELEASE_APP_ID and secret RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY"
+            APP_ID="${REPOSITORY_APP_ID}"
+            HAS_KEY="${HAS_REPOSITORY_APP_KEY}"
+          elif [[ -n "${ORGANIZATION_APP_ID}" || "${HAS_ORGANIZATION_APP_KEY}" == "true" ]]; then
+            SOURCE="organization"
+            PAIR="variable TF_AUTOMATION_APP_ID and secret TF_AUTOMATION_APP_PRIVATE_KEY"
+            APP_ID="${ORGANIZATION_APP_ID}"
+            HAS_KEY="${HAS_ORGANIZATION_APP_KEY}"
           else
-            echo "::error::Set the release GitHub App ID variable and private key secret together (RUST_TEMPLATE_RELEASE_APP_ID and RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY, or TF_AUTOMATION_APP_ID and TF_AUTOMATION_APP_PRIVATE_KEY), or neither to release with GITHUB_TOKEN. App ID set: $([[ -n "${RELEASE_APP_ID}" ]] && echo yes || echo no); private key set: $([[ "${HAS_RELEASE_APP_KEY}" == "true" ]] && echo yes || echo no)."
+            echo "Release token: GITHUB_TOKEN (no GitHub App configured)"
+            {
+              echo "use_app=false"
+              echo "source=none"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -z "${APP_ID}" || "${HAS_KEY}" != "true" ]]; then
+            echo "::error::Only one of the ${PAIR} is set. Set both to release with that GitHub App, or neither to use the next option (repository pair, then organization pair, then GITHUB_TOKEN)."
             exit 1
           fi
+          echo "Release token: GitHub App ${APP_ID} from the ${SOURCE} ${PAIR}"
+          {
+            echo "use_app=true"
+            echo "source=${SOURCE}"
+            echo "app_id=${APP_ID}"
+          } >> "$GITHUB_OUTPUT"
 
       # A dry run mints the same App token a real release would, so a rehearsal
       # proves the App ID, the private key and the installation's permissions.
       # Nothing uses the token, and the action revokes it when the job ends.
       - name: Create GitHub App installation token (dry run)
         id: app_token
-        if: env.DRY_RUN == 'true' && env.RELEASE_APP_ID != '' && env.HAS_RELEASE_APP_KEY == 'true'
+        if: env.DRY_RUN == 'true' && steps.release_app.outputs.use_app == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ env.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
+          client-id: ${{ steps.release_app.outputs.app_id }}
+          # Select step guarantees the chosen pair's key is set.
+          private-key: ${{ steps.release_app.outputs.source == 'repository' && secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
           permission-contents: write
 
       - name: Report dry run
@@ -311,52 +340,16 @@ jobs:
       contents: write
       # Dispatch release.yml and docker.yml for the new tag.
       actions: write
-    env:
-      # Step-level `if:` cannot read `secrets`, so expose only whether a key is set.
-      HAS_RELEASE_APP_KEY: ${{ (secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY) != '' }}
     steps:
-      # Limited to this repository and to contents: write (the release commit,
-      # the tag and the GitHub Release). The check job has already failed the
-      # run if only one of the App ID and the private key is set.
-      - name: Create GitHub App installation token
-        id: app_token
-        if: env.RELEASE_APP_ID != '' && env.HAS_RELEASE_APP_KEY == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ env.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
-          permission-contents: write
-
-      # The checkout keeps this token for the release commit and tag pushes.
+      # No credentials are persisted, so `cargo check` below (which runs
+      # dependency build scripts) never sees a write token; Commit and tag
+      # passes one to git for its fetch and pushes only.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          persist-credentials: false
           ref: ${{ needs.check.outputs.target_sha }}
-
-      - name: Configure Git
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
-        run: |
-          set -euo pipefail
-          if [[ -n "${APP_SLUG}" ]]; then
-            # Author the release commit as the App's bot user.
-            BOT_LOGIN="${APP_SLUG}[bot]"
-            if BOT_ID="$(gh api "users/${BOT_LOGIN}" --jq .id)"; then
-              BOT_EMAIL="${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
-            else
-              echo "::warning::Could not look up ${BOT_LOGIN}; committing as ${BOT_LOGIN}@users.noreply.github.com"
-              BOT_EMAIL="${BOT_LOGIN}@users.noreply.github.com"
-            fi
-            git config user.name "${BOT_LOGIN}"
-            git config user.email "${BOT_EMAIL}"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-          fi
-          echo "Committing as $(git config user.name) <$(git config user.email)>"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
@@ -393,12 +386,58 @@ jobs:
             fi
           fi
 
+      # Minted right before the writes, so slow preparation cannot outlast the
+      # token's one-hour lifetime. Limited to this repository and to
+      # contents: write (the release commit, the tag and the GitHub Release).
+      - name: Create GitHub App installation token
+        id: app_token
+        if: needs.check.outputs.release_app == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ needs.check.outputs.release_app_id }}
+          # The check job guarantees the chosen pair's key is set.
+          private-key: ${{ needs.check.outputs.release_app_source == 'repository' && secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Configure Git
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${APP_SLUG}" ]]; then
+            # Author the release commit as the App's bot user.
+            BOT_LOGIN="${APP_SLUG}[bot]"
+            if BOT_ID="$(gh api "users/${BOT_LOGIN}" --jq .id)"; then
+              BOT_EMAIL="${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
+            else
+              echo "::warning::Could not look up ${BOT_LOGIN}; committing as ${BOT_LOGIN}@users.noreply.github.com"
+              BOT_EMAIL="${BOT_LOGIN}@users.noreply.github.com"
+            fi
+            git config user.name "${BOT_LOGIN}"
+            git config user.email "${BOT_EMAIL}"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+          fi
+          echo "Committing as $(git config user.name) <$(git config user.email)>"
+
       - name: Commit and tag
         id: publish_release_commit
+        env:
+          PUSH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.check.outputs.next_version }}"
           TARGET_SHA="${{ needs.check.outputs.target_sha }}"
+
+          # Authenticate this step's git commands through the environment, the
+          # way actions/checkout does, without writing the token to .git/config.
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${PUSH_TOKEN}" | base64 | tr -d '\n')"
+          echo "::add-mask::${AUTH_HEADER#AUTHORIZATION: basic }"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          export GIT_CONFIG_VALUE_0="${AUTH_HEADER}"
 
           git fetch origin main --no-tags
           CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
