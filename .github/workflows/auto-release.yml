@@ -1,7 +1,9 @@
 name: Auto Release
 
+# Key on the head repository too, so a fork PR whose branch is named "main"
+# cannot cancel an in-progress release run for this repository's main.
 concurrency:
-  group: auto-release-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}
+  group: auto-release-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}
   cancel-in-progress: true
 
 on:
@@ -23,10 +25,9 @@ on:
           - minor
           - major
 
+# Read-only by default; only the release job gets write scopes.
 permissions:
-  contents: write
-  pull-requests: write
-  actions: write
+  contents: read
 
 env:
   RUST_VERSION: 1.99.0
@@ -36,29 +37,46 @@ jobs:
   check:
     name: Check for Release
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # workflow_run also fires for pull_request runs, including fork PRs whose
+    # branch is named "main"; only react to successful pushes to this repo's main.
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    permissions:
+      contents: read
+      actions: read
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       next_version: ${{ steps.version.outputs.next_version }}
       current_version: ${{ steps.version.outputs.current_version }}
       target_sha: ${{ steps.target.outputs.sha }}
     steps:
+      # Check out the workflow's own commit (for workflow_run and schedule, the
+      # current tip of the default branch), never the triggering run's head SHA.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref_name }}
 
       - name: Determine target SHA
         id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          TARGET_SHA="$(git rev-parse HEAD)"
+          if [[ "${EVENT_NAME}" == "workflow_run" && "${TRIGGER_SHA}" != "${TARGET_SHA}" ]]; then
+            # main moved on; the CI status check below only passes once the
+            # new tip's own CI and Security runs have succeeded.
+            echo "Triggering run was for ${TRIGGER_SHA}; evaluating main tip ${TARGET_SHA}"
           fi
+          echo "sha=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Check CI status
         id: ci_status
@@ -144,6 +162,11 @@ jobs:
     needs: check
     if: needs.check.outputs.should_release == 'true'
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    permissions:
+      # Push the release commit and tag, and create the GitHub release.
+      contents: write
+      # Dispatch release.yml and docker.yml for the new tag.
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
