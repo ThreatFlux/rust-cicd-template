@@ -263,6 +263,5 @@ jobs:
         run: |
           set -euo pipefail
           TAG="v${VERSION}"
-          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" \
-            -f version="$VERSION" -f source_ref="refs/tags/${TAG}"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" -f version="$VERSION"
           gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

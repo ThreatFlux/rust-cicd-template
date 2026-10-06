@@ -69,6 +69,10 @@ Use this when the automated flow is insufficient (e.g., pre-release versions, ho
    gh workflow run docker.yml --ref v1.2.3   # once the tag exists
    ```
 
+   `release.yml` always builds, tags and publishes the commit at the `--ref` it was
+   dispatched on (a branch head or an existing tag); to release from a release branch,
+   dispatch on that branch.
+
 ### Dry Run
 
 To exercise the release build without tagging, creating a GitHub Release or publishing,
