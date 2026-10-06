@@ -25,7 +25,7 @@ Releases are driven by [Conventional Commits](https://www.conventionalcommits.or
 
 1. Analyzes commits since the last tag.
 2. Determines the version bump (patch / minor / major) from commit prefixes.
-3. Commits the version bump, creates a new Git tag (`v*`), and creates the GitHub Release with generated notes, using the [release token](#release-token).
+3. Commits the version bump, creates a new Git tag (`v*`), and creates the GitHub Release with [release notes](#release-notes), using the [release token](#release-token).
 4. Starts `release.yml` (build, package, SBOM, crates.io) and `docker.yml` (image build, scan, sign, SBOM) for that tag. With a GitHub App release token, the tag push starts them through their `on: push: tags` triggers and nothing is dispatched. With the `GITHUB_TOKEN` fallback, the tag push starts no workflows, so Auto Release dispatches both on the tag.
 
 Auto Release starts in three ways: when a CI or Security run completes, on its weekly schedule, and by manual dispatch. For completed runs it reacts only to successful `push` runs on this repository's `main`, never to pull-request runs (including fork pull requests from a branch named `main`). Completed-run and scheduled triggers evaluate the current tip of `main` and release only when CI and Security have both succeeded on a push for that exact commit. A manual dispatch skips that check and releases with the bump type you choose, unless it is a [dry run](#rehearse-auto-release). Every run stops before writing anything if the `Cargo.toml` version is lower than the latest `vX.Y.Z` tag. Its workflow token is read-only except in the job that pushes the release commit and tag, creates the GitHub Release and dispatches the tag workflows.
@@ -84,7 +84,26 @@ Report dry run step, also shown in the run summary, names the release token, the
 action (including whether `release.yml` and `docker.yml` would be dispatched or started by
 the tag push), lists the files the release commit would change and ends with "nothing was
 written to the repository". On a ref whose head is not the tip of `main`, it reports that
-Create Release would skip the run as stale instead. Create Release is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
+Create Release would skip the run as stale instead. It also prints the [release
+notes](#release-notes) a release would publish. Create Release is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
+
+### Release Notes
+
+Auto Release and `release.yml` both write the GitHub Release notes with
+`scripts/release_notes.py`. Under a `## Release vX.Y.Z` heading, the notes hold:
+
+- the `## [X.Y.Z]` section of `CHANGELOG.md` (or `docs/CHANGELOG.md`) when it exists and is
+  not empty;
+- otherwise every commit since the previous `vX.Y.Z` tag, grouped into Breaking Changes
+  (`type!:` subjects or `BREAKING CHANGE:` footers), Features, Bug Fixes and Other Changes,
+  leaving out merge commits and `chore: release` commits;
+- then a "Full Changelog" link comparing the previous tag with the new one.
+
+For curated notes, merge the version's changelog section (the `[Unreleased]` items moved
+under `## [X.Y.Z] - YYYY-MM-DD`) before the release, and preview the result with
+`python3 scripts/release_notes.py X.Y.Z` or an Auto Release dry run. Whichever workflow
+creates the GitHub Release writes its notes, normally Auto Release; `release.yml` keeps the
+notes of a release that already exists.
 
 ## Manual Release
 
@@ -150,10 +169,10 @@ A `v*` tag pushed by a maintainer or by the release GitHub App triggers `release
 | Step | Artifact |
 |------|----------|
 | Build | Linux x86_64 (gnu and musl), Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (MSVC) |
-| Package | `.tar.gz` plus `.sha256` (Unix) and `.zip` (Windows), each holding the binary only |
+| Package | `.tar.gz` (Unix) or `.zip` (Windows) holding the binary only, each with a `.sha256` checksum file (`shasum -a 256 -c` format) |
 | SBOM | CycloneDX release SBOM (`<binary>-v<version>.cdx.json`) |
 | Publish | crates.io through [trusted publishing](#cratesio-publishing): each crate version not yet on crates.io is published and versions already there are skipped; nothing is published for `-rc`-style versions, `prerelease` dispatches or when `CRATES_IO_PUBLISH` is `false`; a dry run only runs `cargo publish --dry-run` |
-| GitHub Release | Archives, Unix checksums and the release SBOM attached; a release that `release.yml` creates gets the matching `CHANGELOG.md` (root or `docs/`) section as its notes |
+| GitHub Release | Archives, their checksums and the release SBOM attached; a release that `release.yml` creates gets the [release notes](#release-notes) too |
 
 The `docker.yml` workflow also runs for the tag (on a maintainer or App push, dispatched by auto-release with the `GITHUB_TOKEN` fallback, or dispatched by hand after a `release.yml` dispatch), producing:
 
