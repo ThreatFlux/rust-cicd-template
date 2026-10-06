@@ -162,8 +162,9 @@ Set it up once per crate:
 | `false` | Skips crates.io and logs why | `cargo publish --dry-run` |
 | anything else | Fails the publish job | Fails the publish job |
 
-A repository that never publishes to crates.io (an application, or this template
-itself) sets `CRATES_IO_PUBLISH=false` permanently:
+A repository that never publishes to crates.io (an application, or the
+`ThreatFlux/rust-cicd-template` repository itself) sets `CRATES_IO_PUBLISH=false`
+permanently:
 
 ```bash
 gh variable set CRATES_IO_PUBLISH --repo OWNER/REPO --body false
