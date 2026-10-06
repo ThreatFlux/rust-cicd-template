@@ -48,6 +48,21 @@ Runner defaults:
 - `RUST_TEMPLATE_RUNNER_MACOS_ARM64`
 - `RUST_TEMPLATE_RUNNER_MACOS_X64`
 
+## Release Token
+
+Auto Release works with the workflow `GITHUB_TOKEN` and no setup. To have a GitHub App push
+release commits and tags (so the tag push itself starts `release.yml` and `docker.yml`),
+install an App with **Contents: read and write** on the repository and set both:
+
+- variable `RUST_TEMPLATE_RELEASE_APP_ID`: the App ID or client ID
+- secret `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY`: a private key of that App
+
+ThreatFlux repositories that can see the organization's `TF_AUTOMATION_APP_ID` variable and
+`TF_AUTOMATION_APP_PRIVATE_KEY` secret use that App without either setting. Set both values
+or neither, then rehearse with
+`gh workflow run auto-release.yml --ref main -f version_bump=patch -f dry_run=true`.
+[RELEASING.md](RELEASING.md#release-token) has the details.
+
 ## crates.io Publishing
 
 `release.yml` publishes through crates.io trusted publishing (GitHub OIDC); no registry

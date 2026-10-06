@@ -305,6 +305,13 @@ Defaults to GitHub-hosted runners. Set these only for custom runner labels:
 | Secret | Purpose |
 |--------|---------|
 | `GITHUB_TOKEN` | Release assets, package publishing, container publishing |
+| `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` (optional) | Private key of a GitHub App that cuts auto-releases; pair it with the `RUST_TEMPLATE_RELEASE_APP_ID` variable |
+
+Auto Release falls back to `GITHUB_TOKEN` when no release App is configured, and then
+dispatches `release.yml` and `docker.yml` for each new tag. With an App (the repository
+pair above, or the ThreatFlux organization's `TF_AUTOMATION_APP_ID` and
+`TF_AUTOMATION_APP_PRIVATE_KEY`), the App's tag push starts them directly. See
+[docs/RELEASING.md](docs/RELEASING.md#release-token).
 
 crates.io publishing needs no secret: `release.yml` publishes through
 [crates.io trusted publishing](https://crates.io/docs/trusted-publishing) (GitHub OIDC) from

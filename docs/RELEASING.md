@@ -25,26 +25,61 @@ Releases are driven by [Conventional Commits](https://www.conventionalcommits.or
 
 1. Analyzes commits since the last tag.
 2. Determines the version bump (patch / minor / major) from commit prefixes.
-3. Commits the version bump, creates a new Git tag (`v*`), and creates the GitHub Release with generated notes.
-4. Dispatches `release.yml` (build, package, SBOM, crates.io) and `docker.yml` (image build, scan, sign, SBOM) for that tag. Tags pushed with the workflow `GITHUB_TOKEN` do not trigger other workflows on their own, so this explicit dispatch is required.
+3. Commits the version bump, creates a new Git tag (`v*`), and creates the GitHub Release with generated notes, using the [release token](#release-token).
+4. Starts `release.yml` (build, package, SBOM, crates.io) and `docker.yml` (image build, scan, sign, SBOM) for that tag. With a GitHub App release token, the tag push starts them through their `on: push: tags` triggers and nothing is dispatched. With the `GITHUB_TOKEN` fallback, the tag push starts no workflows, so Auto Release dispatches both on the tag.
 
 Auto Release starts in three ways: when a CI or Security run completes, on its weekly schedule, and by manual dispatch. For completed runs it reacts only to successful `push` runs on this repository's `main`, never to pull-request runs (including fork pull requests from a branch named `main`). Completed-run and scheduled triggers evaluate the current tip of `main` and release only when CI and Security have both succeeded on a push for that exact commit. A manual dispatch skips that check and releases with the bump type you choose, unless it is a [dry run](#rehearse-auto-release). Every run stops before writing anything if the `Cargo.toml` version is lower than the latest `vX.Y.Z` tag. Its workflow token is read-only except in the job that pushes the release commit and tag, creates the GitHub Release and dispatches the tag workflows.
+
+### Release Token
+
+Auto Release writes the release commit, the tag and the GitHub Release with a GitHub App
+installation token when one is configured, and with the workflow `GITHUB_TOKEN` otherwise.
+Configure both values of one pair, or neither:
+
+| Repository setting | Fallback (ThreatFlux org) | Value |
+|--------------------|---------------------------|-------|
+| Variable `RUST_TEMPLATE_RELEASE_APP_ID` | Variable `TF_AUTOMATION_APP_ID` | The App's ID or client ID |
+| Secret `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` | Secret `TF_AUTOMATION_APP_PRIVATE_KEY` | A private key of that App |
+
+The `RUST_TEMPLATE_RELEASE_APP_*` names take precedence; the `TF_AUTOMATION_APP_*` names
+let ThreatFlux repositories use the organization's automation App without per-repository
+setup. If only one value of the pair is set, Auto Release fails before writing anything
+instead of silently falling back.
+
+The App needs **Contents: read and write** on the repository, and the token is limited to
+this repository and that permission. If `main` is protected, allow the App to push to it
+(for example as a ruleset bypass actor). With the App:
+
+- the release commit and tag are pushed by `<app-slug>[bot]`, so the tag push starts
+  `release.yml` and `docker.yml` by itself and Auto Release dispatches nothing
+  (dispatching too would run each of them twice); the run logs a notice saying so
+- the release commit on `main` runs CI, Security and Docker like any other push; the Auto
+  Release run that follows finds no commits since the new tag and does not release again
+
+Without the App, releases work as before: `GITHUB_TOKEN` pushes the commit and tag and
+Auto Release dispatches `release.yml` and `docker.yml` on the new tag. A [dry
+run](#rehearse-auto-release) mints the App token too, so it proves the configuration
+before a real release needs it.
 
 **No manual steps are required for routine releases.**
 
 ### Rehearse Auto Release
 
 To see what Auto Release would do without committing, tagging, creating a GitHub Release
-or dispatching the tag workflows, dispatch it with `dry_run`:
+or starting the tag workflows, dispatch it with `dry_run`:
 
 ```bash
 gh workflow run auto-release.yml --ref main -f version_bump=patch -f dry_run=true
 ```
 
 The Check for Release job logs the commits since the last tag, the decision an automatic
-run would make and why, and the version this dispatch would release. Its Report dry run
-step, also shown in the run summary, names the next action, lists the files the release
-commit would change and ends with "nothing was written to the repository". On a ref whose
+run would make and why, and the version this dispatch would release. When a GitHub App is
+configured, it mints the App's installation token exactly as a release would, then lets it
+be revoked unused, so a misconfigured App ID, key or installation fails the dry run. Its
+Report dry run step, also shown in the run summary, names the release token, the next
+action (including whether `release.yml` and `docker.yml` would be dispatched or started by
+the tag push), lists the files the release commit would change and ends with "nothing was
+written to the repository". On a ref whose
 head is not the tip of `main`, it reports that Create Release would skip the run as stale
 instead. Create Release is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
 
@@ -107,7 +142,7 @@ workflow run only.
 
 ### What Happens Next
 
-A `v*` tag pushed by a maintainer triggers `release.yml` (auto-release dispatches it instead):
+A `v*` tag pushed by a maintainer or by the release GitHub App triggers `release.yml` (with the `GITHUB_TOKEN` fallback, auto-release dispatches it instead):
 
 | Step | Artifact |
 |------|----------|
@@ -117,7 +152,7 @@ A `v*` tag pushed by a maintainer triggers `release.yml` (auto-release dispatche
 | Publish | crates.io through [trusted publishing](#cratesio-publishing): each crate version not yet on crates.io is published and versions already there are skipped; nothing is published for `-rc`-style versions, `prerelease` dispatches or when `CRATES_IO_PUBLISH` is `false`; a dry run only runs `cargo publish --dry-run` |
 | GitHub Release | Archives, Unix checksums and the release SBOM attached; a release that `release.yml` creates gets the matching `CHANGELOG.md` (root or `docs/`) section as its notes |
 
-The `docker.yml` workflow also runs for the tag (on a maintainer push, dispatched by auto-release, or dispatched by hand after a `release.yml` dispatch), producing:
+The `docker.yml` workflow also runs for the tag (on a maintainer or App push, dispatched by auto-release with the `GITHUB_TOKEN` fallback, or dispatched by hand after a `release.yml` dispatch), producing:
 
 | Step | Artifact |
 |------|----------|
@@ -175,6 +210,7 @@ gh variable set CRATES_IO_PUBLISH --repo OWNER/REPO --body false
 | Secret or setting | Holder | Purpose |
 |-------------------|--------|---------|
 | `GITHUB_TOKEN` | Automatic | Tags, release assets, workflow dispatch, GHCR push |
+| Release GitHub App (`RUST_TEMPLATE_RELEASE_APP_ID` and `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY`, or the org's `TF_AUTOMATION_APP_*`) | Repo or org admin | Optional: Auto Release's release commit, tag and GitHub Release, so the tag starts `release.yml` and `docker.yml` ([Release Token](#release-token)) |
 | crates.io trusted publisher and `crates-io` environment | Crate owner and repo admin | crates.io publish through OIDC; no registry token |
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Repo or org admin | Docker Hub push |
 
