@@ -212,14 +212,19 @@ jobs:
       - name: Report dry run
         if: env.DRY_RUN == 'true'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHOULD_RELEASE: ${{ steps.check.outputs.should_release }}
           CURRENT_VERSION: ${{ steps.version.outputs.current_version }}
           NEXT_VERSION: ${{ steps.version.outputs.next_version }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
+          # Create Release skips any target that is not the current tip of main.
+          MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
           {
-            if [[ "$SHOULD_RELEASE" == "true" ]]; then
+            if [[ "$SHOULD_RELEASE" == "true" ]] && [[ "$MAIN_SHA" != "$TARGET_SHA" ]]; then
+              echo "Dry run: would not release v${NEXT_VERSION}: ${TARGET_SHA} is not the tip of main (${MAIN_SHA}), so Create Release would skip it as stale."
+            elif [[ "$SHOULD_RELEASE" == "true" ]]; then
               TAG="v${NEXT_VERSION}"
               # Bump this read-only checkout only to list the files a release would commit.
               python3 scripts/release_version.py set "$NEXT_VERSION"

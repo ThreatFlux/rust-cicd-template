@@ -44,8 +44,9 @@ gh workflow run auto-release.yml --ref main -f version_bump=patch -f dry_run=tru
 The Check for Release job logs the commits since the last tag, the decision an automatic
 run would make and why, and the version this dispatch would release. Its Report dry run
 step, also shown in the run summary, names the next action, lists the files the release
-commit would change and ends with "nothing was written to the repository". Create Release
-is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
+commit would change and ends with "nothing was written to the repository". On a ref whose
+head is not the tip of `main`, it reports that Create Release would skip the run as stale
+instead. Create Release is skipped. Dry runs have their own concurrency group, so they never cancel a real run.
 
 ## Manual Release
 
