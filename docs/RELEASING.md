@@ -180,9 +180,9 @@ The `docker.yml` workflow also runs for the tag (on a maintainer or App push, di
 |------|----------|
 | Build | `linux/amd64` and `linux/arm64` image |
 | Scan | Trivy vulnerability scan |
-| Sign | Cosign keyless image signature |
+| Sign | Cosign keyless image signature on GHCR, and on Docker Hub when [Docker Hub publishing](#docker-hub-publishing) is on |
 | SBOM | SPDX image SBOM (workflow artifact) |
-| Push | `ghcr.io/threatflux/<image>` and `docker.io/<namespace>/<image>` with semver tags (`1.2.3`, `1.2`, `1`) and the short SHA |
+| Push | `ghcr.io/threatflux/<image>` with semver tags (`1.2.3`, `1.2`, `1`) and the short SHA; the same image goes to `docker.io/<namespace>/<image>` only when [Docker Hub publishing](#docker-hub-publishing) is on |
 | Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.99.0` (`base-rust-latest` on `main` only) |
 
 ### crates.io Publishing
@@ -227,6 +227,50 @@ permanently:
 gh variable set CRATES_IO_PUBLISH --repo OWNER/REPO --body false
 ```
 
+### Docker Hub Publishing
+
+GHCR (`ghcr.io/threatflux/<image>`) is the primary registry. Docker Hub publishing is off
+unless the `RUST_TEMPLATE_PUBLISH_DOCKERHUB` variable is `true`, the same switch the other
+ThreatFlux Rust repositories use. While it is off, `docker.yml` does not log in to
+`docker.io`, reads no `DOCKERHUB_*` secret and generates no `docker.io` tags. Turning it
+off deletes nothing: images already on Docker Hub stay as they are.
+
+To publish to Docker Hub again:
+
+1. Create the Docker Hub repository `<namespace>/<repo>`: the lowercased GitHub
+   repository name under the `RUST_TEMPLATE_DOCKERHUB_NAMESPACE` variable
+   (default `threatflux`).
+2. Create a Docker Hub personal access token with **Read & Write** access (never
+   **Read, Write & Delete**) for an account that can write to only the repositories this
+   workflow publishes, for example a bot account in a Docker Hub team that has
+   **Read & Write** on just those repositories.
+3. Store the token as the `DOCKERHUB_TOKEN` secret and the account name as
+   `DOCKERHUB_USERNAME`, either as repository secrets or as organization secrets limited to
+   the repositories that publish. The account name must not appear in the lowercased
+   GitHub `owner/repo` path (`threatflux/<repo>`): GitHub drops a job output that contains a
+   secret's value, and `docker.yml` hands that path from the build job to the scan, sign
+   and SBOM jobs. That rules out a Docker Hub organization access token for the
+   `threatflux` organization, whose username is the organization name.
+4. Turn the switch on:
+
+   ```bash
+   gh variable set RUST_TEMPLATE_PUBLISH_DOCKERHUB --repo OWNER/REPO --body true
+   ```
+
+The next non-PR `docker.yml` run logs in to Docker Hub, pushes the same multi-arch image
+(same digest and tags, plus the `base-rust-*` tags) to `docker.io/<namespace>/<repo>`, and wherever the `Sign Container`
+job signs the GHCR image (`main` and `v*` tags) it also signs the Docker Hub copy with the
+same keyless identity. If the switch is on but either secret is missing, the run warns and
+publishes to GHCR only. Check a signature with:
+
+```bash
+cosign verify docker.io/<namespace>/<repo>:<tag> \
+  --certificate-identity-regexp '^https://github.com/OWNER/REPO/\.github/workflows/docker\.yml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To stop publishing there, delete the variable or set it to `false`.
+
 ### Required Permissions
 
 | Secret or setting | Holder | Purpose |
@@ -234,7 +278,7 @@ gh variable set CRATES_IO_PUBLISH --repo OWNER/REPO --body false
 | `GITHUB_TOKEN` | Automatic | Tags, release assets, workflow dispatch, GHCR push |
 | Release GitHub App (`RUST_TEMPLATE_RELEASE_APP_ID` and `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY`, or the org's `TF_AUTOMATION_APP_*`) | Repo or org admin | Optional: Auto Release's release commit, tag and GitHub Release, so the tag starts `release.yml` and `docker.yml` ([Release Token](#release-token)) |
 | crates.io trusted publisher and `crates-io` environment | Crate owner and repo admin | crates.io publish through OIDC; no registry token |
-| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Repo or org admin | Docker Hub push |
+| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Repo or org admin | Optional: Docker Hub push and signing, read only when `RUST_TEMPLATE_PUBLISH_DOCKERHUB` is `true` ([Docker Hub Publishing](#docker-hub-publishing)) |
 
 ### Rollback
 

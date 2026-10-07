@@ -74,6 +74,15 @@ secret is needed or read.
   remove the variable. [RELEASING.md](RELEASING.md#cratesio-publishing) has the steps.
 - Never published to crates.io: set `CRATES_IO_PUBLISH` to `false` and leave it.
 
+## Docker Hub (optional)
+
+`docker.yml` publishes to GHCR only. To also push and sign the image on Docker Hub, create
+a token that can push to only this image's Docker Hub repository, store it as the
+`DOCKERHUB_TOKEN` secret with its username as `DOCKERHUB_USERNAME`, and set the
+`RUST_TEMPLATE_PUBLISH_DOCKERHUB` variable to `true` (`RUST_TEMPLATE_DOCKERHUB_NAMESPACE`
+picks the namespace, default `threatflux`). Leave the variable unset to stay on GHCR only.
+[RELEASING.md](RELEASING.md#docker-hub-publishing) has the steps.
+
 ## Validation
 
 Run locally:
