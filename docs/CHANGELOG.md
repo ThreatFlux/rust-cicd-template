@@ -31,8 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Docker Hub publishing is opt-in: `docker.yml` pushes to GHCR only unless the
-  `RUST_TEMPLATE_PUBLISH_DOCKERHUB` variable is `true`, and then also Cosign-signs the
-  Docker Hub image with the same keyless identity as the GHCR image
+  `RUST_TEMPLATE_PUBLISH_DOCKERHUB` variable is `true` and the `DOCKERHUB_USERNAME` and
+  `DOCKERHUB_TOKEN` secrets are available; it then also pushes to Docker Hub and
+  Cosign-signs the Docker Hub image with the same keyless identity as the GHCR image
 
 ## [0.5.1] - 2026-10-06
 
