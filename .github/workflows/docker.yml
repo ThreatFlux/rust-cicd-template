@@ -28,6 +28,11 @@ env:
   REGISTRY: ghcr.io
   DOCKERHUB_REGISTRY: docker.io
   DOCKERHUB_NAMESPACE: ${{ vars.RUST_TEMPLATE_DOCKERHUB_NAMESPACE || 'threatflux' }}
+  # GHCR is the primary registry. Docker Hub is opt-in: only the value 'true'
+  # (with the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets available) logs in
+  # to docker.io, pushes the same image there and signs it. Unset, 'false' or
+  # any other value publishes to GHCR only and reads no Docker Hub secret.
+  PUBLISH_DOCKERHUB: ${{ vars.RUST_TEMPLATE_PUBLISH_DOCKERHUB || 'false' }}
   DOCKER_BUILDKIT: 1
   BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
   BINARY_PACKAGE: ${{ vars.RUST_TEMPLATE_BINARY_PACKAGE || '' }}
@@ -56,6 +61,11 @@ jobs:
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       image_name: ${{ steps.lowercase.outputs.image_name }}
+      # 'true' only when this run pushed to Docker Hub; the sign job then signs
+      # the Docker Hub copy too. A flag rather than the image reference, since
+      # a job output that contains a secret's value (the Docker Hub account
+      # name can match the namespace) is dropped.
+      dockerhub_enabled: ${{ steps.image_targets.outputs.dockerhub_enabled }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,6 +101,52 @@ jobs:
           echo "value=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
           echo "needs_qemu=true" >> "$GITHUB_OUTPUT"
 
+      # Apart from the Docker Hub logins, which run only when this step passes,
+      # nothing reads a Docker Hub secret, and this step runs only after the
+      # explicit opt-in.
+      - name: Check Docker Hub credentials
+        id: dockerhub_credentials
+        if: github.event_name != 'pull_request' && env.PUBLISH_DOCKERHUB == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::RUST_TEMPLATE_PUBLISH_DOCKERHUB is 'true' but the DOCKERHUB_USERNAME or DOCKERHUB_TOKEN secret is not available to this repository; publishing to GHCR only."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve image targets
+        id: image_targets
+        env:
+          GHCR_IMAGE: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/${{ steps.dockerhub_repo.outputs.name }}
+          DOCKERHUB_READY: ${{ steps.dockerhub_credentials.outputs.ready }}
+        run: |
+          set -euo pipefail
+          dockerhub_enabled=false
+          if [[ "${DOCKERHUB_READY}" == "true" ]]; then
+            dockerhub_enabled=true
+          fi
+          {
+            echo "images<<EOF"
+            echo "${GHCR_IMAGE}"
+            if [[ "${dockerhub_enabled}" == "true" ]]; then
+              echo "${DOCKERHUB_IMAGE}"
+            fi
+            echo "EOF"
+            echo "dockerhub_enabled=${dockerhub_enabled}"
+          } >> "$GITHUB_OUTPUT"
+          if [[ "${dockerhub_enabled}" == "true" ]]; then
+            echo "Image targets: ${GHCR_IMAGE} and ${DOCKERHUB_IMAGE}"
+          elif [[ "${PUBLISH_DOCKERHUB}" != "true" ]]; then
+            echo "Image target: ${GHCR_IMAGE}. Docker Hub publishing is off; set the RUST_TEMPLATE_PUBLISH_DOCKERHUB variable to 'true' to opt in."
+          else
+            echo "Image target: ${GHCR_IMAGE}. Docker Hub publishing is on but skipped for this run (a pull request, or missing Docker Hub secrets)."
+          fi
+
       - name: Set up QEMU
         if: steps.platforms.outputs.needs_qemu == 'true'
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
@@ -107,7 +163,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.image_targets.outputs.dockerhub_enabled == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.DOCKERHUB_REGISTRY }}
@@ -118,9 +174,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
-            ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/${{ steps.dockerhub_repo.outputs.name }}
+          images: ${{ steps.image_targets.outputs.images }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -134,9 +188,7 @@ jobs:
         id: base_meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
-            ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/${{ steps.dockerhub_repo.outputs.name }}
+          images: ${{ steps.image_targets.outputs.images }}
           tags: |
             type=raw,value=base-rust-${{ steps.rust_toolchain.outputs.version }}
             type=raw,value=base-rust-latest,enable={{is_default_branch}}
@@ -301,10 +353,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: needs.build.outputs.dockerhub_enabled == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Sign container image
         run: cosign sign --yes ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}@${{ needs.build.outputs.digest }}
         env:
           COSIGN_EXPERIMENTAL: 1
+
+      # The build pushed one multi-arch index to both registries, so the GHCR
+      # digest is also the Docker Hub digest. Keyless signing uses this job's
+      # OIDC token, so both signatures carry the same certificate identity.
+      - name: Sign Docker Hub image
+        if: needs.build.outputs.dockerhub_enabled == 'true'
+        env:
+          COSIGN_EXPERIMENTAL: 1
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          cosign sign --yes "${DOCKERHUB_REGISTRY}/${DOCKERHUB_NAMESPACE}/${REPO_NAME,,}@${DIGEST}"
 
   sbom:
     name: Generate SBOM

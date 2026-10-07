@@ -261,6 +261,11 @@ the runtime, and all base images are digest-pinned. Dependabot refreshes each
 Dockerfile's first `FROM` (the Rust builder); maintainers refresh the later runtime digest
 with the `docker buildx imagetools inspect` command documented in the Dockerfiles.
 
+`docker.yml` pushes the multi-arch image to GHCR (`ghcr.io/<owner>/<repo>`), signs it with
+Cosign keyless signing and keeps an SPDX SBOM. Docker Hub is opt-in: it is used only when
+`RUST_TEMPLATE_PUBLISH_DOCKERHUB` is `true` (see
+[Docker Hub publishing](docs/RELEASING.md#docker-hub-publishing)).
+
 | Repository variable | Default | Purpose |
 |---------------------|---------|---------|
 | `RUST_TEMPLATE_BINARY_NAME` | repo name | Cargo `--bin` target to build |
@@ -271,6 +276,8 @@ with the `docker buildx imagetools inspect` command documented in the Dockerfile
 | `RUST_TEMPLATE_EXTRA_RUNTIME_PACKAGES` | _(empty)_ | Extra apt packages needed at **runtime**; only honoured by `Dockerfile.debian` |
 | `RUST_TEMPLATE_APP_PORT` | `8080` | `EXPOSE` metadata |
 | `RUST_TEMPLATE_DOCKERFILE` | `Dockerfile` | Set to `Dockerfile.debian` to opt into the shell variant |
+| `RUST_TEMPLATE_PUBLISH_DOCKERHUB` | _(unset, off)_ | `true` also pushes and signs the image on Docker Hub; anything else publishes to GHCR only ([Docker Hub publishing](docs/RELEASING.md#docker-hub-publishing)) |
+| `RUST_TEMPLATE_DOCKERHUB_NAMESPACE` | `threatflux` | Docker Hub namespace, used only when Docker Hub publishing is on |
 
 The binary is installed at a fixed `/usr/local/bin/app` because exec-form `ENTRYPOINT` and
 `HEALTHCHECK` cannot expand build ARGs; `CLI_NAME` becomes a symlink beside it.
@@ -306,6 +313,7 @@ Defaults to GitHub-hosted runners. Set these only for custom runner labels:
 |--------|---------|
 | `GITHUB_TOKEN` | Release assets, package publishing, container publishing |
 | `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` (optional) | Private key of a GitHub App that cuts auto-releases; set it together with the `RUST_TEMPLATE_RELEASE_APP_ID` variable |
+| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (optional) | Docker Hub push and signing; read only when `RUST_TEMPLATE_PUBLISH_DOCKERHUB` is `true` |
 
 Auto Release falls back to `GITHUB_TOKEN` when no release App is configured, and then
 dispatches `release.yml` and `docker.yml` for each new tag. With an App (the repository
