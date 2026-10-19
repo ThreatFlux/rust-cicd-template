@@ -276,7 +276,7 @@ jobs:
       - name: Create GitHub App installation token (dry run)
         id: app_token
         if: env.DRY_RUN == 'true' && steps.release_app.outputs.use_app == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ steps.release_app.outputs.app_id }}
           # Select step guarantees the chosen pair's key is set.
@@ -359,7 +359,7 @@ jobs:
           ref: ${{ needs.check.outputs.target_sha }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -393,7 +393,7 @@ jobs:
       - name: Create GitHub App installation token
         id: app_token
         if: needs.check.outputs.release_app == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ needs.check.outputs.release_app_id }}
           # The check job guarantees the chosen pair's key is set.
