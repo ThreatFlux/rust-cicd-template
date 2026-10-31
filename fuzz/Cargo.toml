@@ -1,0 +1,23 @@
+[package]
+name = "rust-cicd-template-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+rust-cicd-template = { path = ".." }
+
+[[bin]]
+name = "add"
+path = "fuzz_targets/add.rs"
+test = false
+doc = false
+bench = false
+
+# Keep fuzz-only dependencies and profiles outside the application's graph.
+[workspace]
+members = ["."]
