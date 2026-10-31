@@ -10,10 +10,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from release_version import update_lockfile  # noqa: E402
+from release_version import replace_manifest_versions, update_lockfile  # noqa: E402
 
 
 class UpdateLockfileTests(unittest.TestCase):
+    def test_manifest_changes_only_local_path_dependency_versions(self) -> None:
+        original = '''[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+helper = "0.9.0"
+local_helper = { package = "helper", path = "../helper", version = "0.1.0" }
+'''
+
+        updated = tomllib.loads(replace_manifest_versions(original, "1.2.3", {"app", "helper"}))
+
+        self.assertEqual(updated["package"]["version"], "1.2.3")
+        self.assertEqual(updated["dependencies"]["helper"], "0.9.0")
+        self.assertEqual(updated["dependencies"]["local_helper"]["version"], "1.2.3")
+
     def test_qualified_local_reference_changes_without_touching_registry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "Cargo.lock"

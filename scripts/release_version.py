@@ -69,9 +69,10 @@ def internal_dependency_aliases(manifest: dict, internal_names: set[str]) -> dic
     aliases: dict[tuple[str, ...], set[str]] = {}
     for section, dependencies in dependency_groups(manifest):
         for alias, spec in dependencies.items():
-            name = spec.get("package", alias) if isinstance(spec, dict) else alias
-            version = spec.get("version") if isinstance(spec, dict) else spec
-            if name in internal_names and isinstance(version, str):
+            if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+                continue
+            name = spec.get("package", alias)
+            if name in internal_names and isinstance(spec.get("version"), str):
                 aliases.setdefault(section, set()).add(alias)
     return aliases
 
