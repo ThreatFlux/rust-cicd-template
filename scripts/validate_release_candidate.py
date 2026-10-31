@@ -11,7 +11,8 @@ import argparse
 import copy
 import json
 import re
-import subprocess
+# B404: git reads commit objects as data using argument lists, never a shell.
+import subprocess  # nosec B404
 import tomllib
 from pathlib import Path
 
@@ -24,11 +25,17 @@ LOCKFILES = ("Cargo.lock", "fuzz/Cargo.lock")
 
 
 def git(*args: str) -> bytes:
-    return subprocess.run(["git", *args], check=True, capture_output=True).stdout
+    # B603/B607: fixed git subcommands, validated commit IDs, and no shell.
+    return subprocess.run(  # nosec B603, B607
+        ["git", *args], check=True, capture_output=True, shell=False
+    ).stdout
 
 
 def blob(commit: str, path: str) -> bytes | None:
-    result = subprocess.run(["git", "show", f"{commit}:{path}"], capture_output=True)
+    # B603/B607: read a Git object by validated commit ID and path, without a shell.
+    result = subprocess.run(  # nosec B603, B607
+        ["git", "show", f"{commit}:{path}"], capture_output=True, shell=False
+    )
     if result.returncode:
         return None
     return result.stdout
@@ -93,11 +100,7 @@ def expected_manifest(
     return expected
 
 
-def normalize_lock(lock: dict, versions: dict[str, str], next_version: str, *, is_base: bool) -> dict:
-    normalized = copy.deepcopy(lock)
-    packages = normalized.pop("package", None)
-    if not isinstance(packages, list) or not all(isinstance(item, dict) for item in packages):
-        raise ValueError("Cargo.lock must contain package tables")
+def local_lock_packages(packages: list[dict], versions: dict[str, str]) -> tuple[dict[str, int], set[str]]:
     counts: dict[str, int] = {}
     local_names: set[str] = set()
     for package in packages:
@@ -107,46 +110,75 @@ def normalize_lock(lock: dict, versions: dict[str, str], next_version: str, *, i
         counts[name] = counts.get(name, 0) + 1
         if name in versions and "source" not in package:
             local_names.add(name)
+    return counts, local_names
 
+
+def canonical_lock_dependency(
+    dependency: str,
+    expected_versions: dict[str, str],
+    counts: dict[str, int],
+    local_names: set[str],
+) -> str:
+    for local_name in local_names:
+        qualified = f"{local_name} {expected_versions[local_name]}"
+        if dependency == qualified or (counts.get(local_name) == 1 and dependency == local_name):
+            return f"{local_name} <local>"
+    return dependency
+
+
+def normalize_lock_package(
+    package: dict,
+    expected_versions: dict[str, str],
+    next_version: str,
+    counts: dict[str, int],
+    local_names: set[str],
+) -> None:
+    name = package.get("name")
+    if name in local_names and "source" not in package:
+        expected = expected_versions[name]
+        if package.get("version") != expected:
+            raise ValueError(f"local lock package {name} has unexpected version {package.get('version')}")
+        package["version"] = next_version
+    dependencies = package.get("dependencies")
+    if dependencies is None:
+        return
+    if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
+        raise ValueError("Cargo.lock has invalid package dependencies")
+    package["dependencies"] = sorted(
+        canonical_lock_dependency(dependency, expected_versions, counts, local_names)
+        for dependency in dependencies
+    )
+
+
+def normalize_lock(lock: dict, versions: dict[str, str], next_version: str, *, is_base: bool) -> dict:
+    normalized = copy.deepcopy(lock)
+    packages = normalized.pop("package", None)
+    if not isinstance(packages, list) or not all(isinstance(item, dict) for item in packages):
+        raise ValueError("Cargo.lock must contain package tables")
+    counts, local_names = local_lock_packages(packages, versions)
+    expected_versions = versions if is_base else dict.fromkeys(versions, next_version)
     for package in packages:
-        name = package.get("name")
-        if name in local_names and "source" not in package:
-            expected = versions[name] if is_base else next_version
-            if package.get("version") != expected:
-                raise ValueError(f"local lock package {name} has unexpected version {package.get('version')}")
-            package["version"] = next_version
-        dependencies = package.get("dependencies")
-        if dependencies is not None:
-            if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
-                raise ValueError("Cargo.lock has invalid package dependencies")
-            canonical: list[str] = []
-            for dependency in dependencies:
-                replacement = dependency
-                for local_name in local_names:
-                    old_version = versions[local_name]
-                    qualified = f"{local_name} {old_version if is_base else next_version}"
-                    if dependency == qualified or (counts.get(local_name) == 1 and dependency == local_name):
-                        replacement = f"{local_name} <local>"
-                        break
-                canonical.append(replacement)
-            package["dependencies"] = sorted(canonical)
+        normalize_lock_package(package, expected_versions, next_version, counts, local_names)
     normalized["package"] = sorted(packages, key=lambda item: json.dumps(item, sort_keys=True))
     return normalized
 
 
-def validate(base: str, candidate: str, next_version: str) -> None:
+def validate_commits_and_version(base: str, candidate: str, next_version: str) -> None:
     if not SHA.fullmatch(base) or not SHA.fullmatch(candidate) or not VERSION.fullmatch(next_version):
         raise ValueError("expected full SHA-1 commits and a MAJOR.MINOR.PATCH version")
     if git("rev-parse", "HEAD").decode().strip() != base:
         raise ValueError("validator must run from the trusted main checkout")
-    root = manifest(base, "Cargo.toml")
+
+
+def validate_root_version(root: dict, next_version: str) -> None:
     current = root.get("package", {}).get("version")
     if not isinstance(current, str):
         current = root.get("workspace", {}).get("package", {}).get("version")
     if not isinstance(current, str) or current == next_version:
         raise ValueError("candidate must change the root package version")
-    package_paths, versions = package_versions(base, root)
 
+
+def changed_candidate_manifests(base: str, candidate: str) -> set[str]:
     changes = git("diff", "--name-only", "-z", base, candidate).decode("utf-8").split("\0")
     changed_manifests: set[str] = set()
     for path in filter(None, changes):
@@ -154,12 +186,26 @@ def validate(base: str, candidate: str, next_version: str) -> None:
             changed_manifests.add(path)
         elif path not in LOCKFILES:
             raise ValueError(f"candidate changes non-release file {path}")
+    return changed_manifests
+
+
+def validate_manifests(
+    base: str,
+    candidate: str,
+    next_version: str,
+    root: dict,
+) -> dict[str, str]:
+    package_paths, versions = package_versions(base, root)
+    changed_manifests = changed_candidate_manifests(base, candidate)
     for path in package_paths | changed_manifests:
         original = manifest(base, path)
         actual = manifest(candidate, path)
         if actual != expected_manifest(original, path, package_paths, versions, next_version):
             raise ValueError(f"{path} changes fields other than expected package/path dependency versions")
+    return versions
 
+
+def validate_lockfiles(base: str, candidate: str, next_version: str, versions: dict[str, str]) -> None:
     for path in LOCKFILES:
         original_blob = blob(base, path)
         candidate_blob = blob(candidate, path)
@@ -173,6 +219,14 @@ def validate(base: str, candidate: str, next_version: str) -> None:
             actual, versions, next_version, is_base=False
         ):
             raise ValueError(f"{path} changes package data beyond local versions/dependency references")
+
+
+def validate(base: str, candidate: str, next_version: str) -> None:
+    validate_commits_and_version(base, candidate, next_version)
+    root = manifest(base, "Cargo.toml")
+    validate_root_version(root, next_version)
+    versions = validate_manifests(base, candidate, next_version, root)
+    validate_lockfiles(base, candidate, next_version, versions)
 
 
 def main() -> None:
