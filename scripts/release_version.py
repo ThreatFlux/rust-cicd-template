@@ -201,12 +201,9 @@ def update_manifest(path: Path, new_version: str, internal_names: set[str]) -> b
     return False
 
 
-def update_lockfile(path: Path, new_version: str, internal_names: set[str]) -> bool:
-    if not path.is_file():
-        return False
-    original = path.read_text(encoding="utf-8")
-    blocks = re.split(r"(?m)(?=^[ \t]*\[\[[ \t]*package[ \t]*\]\][ \t]*(?:#.*)?$)", original)
-    packages = [tomllib.loads(block).get("package", []) for block in blocks]
+def lock_reference_versions(
+    packages: list[list[dict]], new_version: str, internal_names: set[str]
+) -> tuple[dict[str, str], set[str]]:
     local_refs = {
         f"{package['name']} {package['version']}": f"{package['name']} {new_version}"
         for group in packages
@@ -219,29 +216,50 @@ def update_lockfile(path: Path, new_version: str, internal_names: set[str]) -> b
         for package in group
         if "source" in package
     }
+    return local_refs, registry_refs
+
+
+def replace_lock_package_version(path: Path, block: str, package: dict, new_version: str) -> str:
+    block, count = re.subn(
+        r'(?m)^([ \t]*version[ \t]*=[ \t]*)(["\'])([^"\'\r\n]+)\2',
+        lambda match: f"{match[1]}{match[2]}{new_version}{match[2]}",
+        block,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"{path} has no version for {package['name']}")
+    return block
+
+
+def replace_lock_dependency_refs(
+    path: Path, block: str, package: dict, local_refs: dict[str, str], registry_refs: set[str]
+) -> str:
+    for dependency in package.get("dependencies", []):
+        if dependency not in local_refs:
+            continue
+        if dependency in registry_refs:
+            raise SystemExit(f"{path} has ambiguous local/registry dependency {dependency}")
+        old_ref = f'"{dependency}"'
+        if block.count(old_ref) != 1:
+            raise SystemExit(f"{path} cannot locate dependency reference {dependency}")
+        block = block.replace(old_ref, f'"{local_refs[dependency]}"')
+    return block
+
+
+def update_lockfile(path: Path, new_version: str, internal_names: set[str]) -> bool:
+    if not path.is_file():
+        return False
+    original = path.read_text(encoding="utf-8")
+    blocks = re.split(r"(?m)(?=^[ \t]*\[\[[ \t]*package[ \t]*\]\][ \t]*(?:#.*)?$)", original)
+    packages = [tomllib.loads(block).get("package", []) for block in blocks]
+    local_refs, registry_refs = lock_reference_versions(packages, new_version, internal_names)
     for idx, block in enumerate(blocks):
         if not packages[idx]:
             continue
         package = packages[idx][0]
         if package.get("name") in internal_names and "source" not in package:
-            block, count = re.subn(
-                r'(?m)^([ \t]*version[ \t]*=[ \t]*)(["\'])([^"\'\r\n]+)\2',
-                lambda match: f"{match[1]}{match[2]}{new_version}{match[2]}",
-                block,
-                count=1,
-            )
-            if count != 1:
-                raise SystemExit(f"{path} has no version for {package['name']}")
-        for dependency in package.get("dependencies", []):
-            if dependency not in local_refs:
-                continue
-            if dependency in registry_refs:
-                raise SystemExit(f"{path} has ambiguous local/registry dependency {dependency}")
-            old_ref = f'"{dependency}"'
-            if block.count(old_ref) != 1:
-                raise SystemExit(f"{path} cannot locate dependency reference {dependency}")
-            block = block.replace(old_ref, f'"{local_refs[dependency]}"')
-        blocks[idx] = block
+            block = replace_lock_package_version(path, block, package, new_version)
+        blocks[idx] = replace_lock_dependency_refs(path, block, package, local_refs, registry_refs)
     updated = "".join(blocks)
     if updated != original:
         path.write_text(updated, encoding="utf-8")
