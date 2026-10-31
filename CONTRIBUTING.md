@@ -8,15 +8,15 @@ This repository is the canonical Rust CI/CD template used across ThreatFlux proj
 2. Clone your fork of this repository
 3. Create a branch: `git checkout -b feat/your-change`
 4. Make your changes
-5. Run checks: `make ci-local`
+5. Run the repository formatting and lint checks: `make fmt-check` and `make lint`
 6. Open a Pull Request
 
 ## Development Setup
 
 ```bash
 make dev-setup
-make install-hooks
-make ci-local
+make fmt-check
+make lint
 ```
 
 ## Commit Guidelines
@@ -36,14 +36,22 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - Explain what changed and why
 - Add tests or validation where applicable
 - Update template bootstrap docs when setup requirements change
+- Obtain an independent review before merging to `main`; a PR author or release bot must not approve its own change
+- Confirm required GitHub CI and Security PR checks on the current merge result; verify
+  raw-head push checks too when the candidate branch was pushed by the release App
 
 ### PR Checklist
 
-- [ ] Code follows project style (`make fmt`)
-- [ ] All tests pass (`make test`)
+- [ ] Code follows project style (`make fmt-check`)
+- [ ] Hosted CI tests and builds pass for the current PR head and merge result
 - [ ] Linting passes (`make lint`)
+- [ ] Hosted Security checks pass for the current PR head and merge result
+- [ ] Required reviewer approval and conversation resolution are complete
 - [ ] Bootstrap docs updated if needed
 - [ ] Commit messages follow conventions
+
+The optional installed hooks run broader local suites. The required tests, builds,
+coverage, generated-contract checks and security checks run in GitHub workflows.
 
 ## Documentation
 

@@ -2,19 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
-    paths-ignore:
-      - "**.md"
-      - "LICENSE"
-      - ".gitignore"
-      - "docs/**"
+    branches: [main, dev, "release/**", "automation/release-v**"]
   pull_request:
-    branches: [main, dev]
-    paths-ignore:
-      - "**.md"
-      - "LICENSE"
-      - ".gitignore"
-      - "docs/**"
+    branches: [main, dev, "release/**"]
+  merge_group:
   schedule:
     - cron: "0 0 * * 0"
   workflow_dispatch:

@@ -16,6 +16,22 @@ Run this checklist immediately after generating a new repository from the templa
 5. Update `SECURITY.md` advisory links if the repository is not under ThreatFlux.
 6. Run `make template-check`.
 
+## Reviewed Changes and Releases
+
+1. Inspect the effective rulesets, branch protection, bypass actors and approval history
+   for `main` and any active release branch. Require PRs, an independent approval,
+   stale-approval dismissal, resolved conversations and appropriate required checks;
+   block force pushes and deletion. Do not give the release App a bypass of PR review.
+2. Confirm the owner in `.github/CODEOWNERS` can review and that another maintainer is
+   available to approve release PRs. Replace the inherited owner for a new project.
+3. Use check contexts from observed GitHub runs. `ci.yml` and `security.yml` run on all
+   `main` pushes and PRs, including documentation changes; required jobs must not be
+   conditional or absent. If using a merge queue, verify its `merge_group` runs too.
+   Verify an unapproved PR is blocked and an approved PR can merge.
+4. Protect `v*` tags so only authorized release actors can create them. Rehearse a
+   release PR, its required checks, approval, merge and exact-commit tag before relying
+   on automatic releases. See [RELEASING.md](RELEASING.md#automated-release-default).
+
 ## Single-Crate Projects
 
 1. Confirm `BINARY_NAME` in `Makefile`.
@@ -50,9 +66,14 @@ Runner defaults:
 
 ## Release Token
 
-Auto Release works with the workflow `GITHUB_TOKEN` and no setup. To have a GitHub App push
-release commits and tags (so the tag push itself starts `release.yml` and `docker.yml`),
-install an App with **Contents: read and write** on the repository and set both:
+Auto Release proposes a version PR and tags its accepted merge commit after exact-commit
+CI and Security push runs pass. It never pushes a release commit to `main`. With the
+workflow `GITHUB_TOKEN`, allow Actions to create pull requests in repository/organization
+Actions settings; a maintainer with write access must approve the resulting waiting PR
+workflow runs after an `opened`, `synchronize` or `reopened` event. This is separate from
+independent PR review. Its candidate-branch push does not start push workflows; the PR
+checks run after approval. To use a GitHub App instead, install it with **Contents: read
+and write** and **Pull requests: read and write** on this repository and set both:
 
 - variable `RUST_TEMPLATE_RELEASE_APP_ID`: the App ID or client ID
 - secret `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY`: a private key of that App
@@ -61,7 +82,10 @@ ThreatFlux repositories that can see the organization's `TF_AUTOMATION_APP_ID` v
 `TF_AUTOMATION_APP_PRIVATE_KEY` secret use that App when neither repository value is set.
 Set both values of a pair or neither (a half-set pair fails the run), then rehearse with
 `gh workflow run auto-release.yml --ref main -f version_bump=patch -f dry_run=true`.
-[RELEASING.md](RELEASING.md#release-token) has the details.
+The App needs no bypass of `main`; its candidate-branch push starts raw-head CI and
+Security checks, its PR event starts PR checks, and its tag push starts `release.yml`
+and `docker.yml`. [RELEASING.md](RELEASING.md#release-token)
+has the details. Verify the effective settings; this checklist cannot establish them.
 
 ## crates.io Publishing
 
@@ -89,14 +113,13 @@ Run locally:
 
 ```bash
 make dev-setup
-make hooks-install
 make template-check
-make ci-local
-make docker-build
+make fmt-check
+make lint
 ```
 
 Development uses the pinned Rust 1.99.0 toolchain. The default package MSRV is
 1.97.1; keep `Cargo.toml`, `Makefile` and the CI MSRV job aligned when changing it.
-Hooks are installed for the current Git worktree: pre-commit runs formatting,
-Clippy and doc tests, and pre-push runs `make ci-local`. The full local gate also
-checks strict Clippy, the feature powerset, coverage, benchmarks, MSRV and SBOMs.
+The optional hooks still run broader local suites; GitHub runners perform the required
+tests, builds, coverage, generated-contract checks and security checks. Inspect their
+results on the exact pushed commit before merging or claiming a release is ready.

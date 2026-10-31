@@ -37,7 +37,7 @@ Yes. Remove the `[[bin]]` section from `Cargo.toml`, add a `[lib]` section, and 
 1. Create the crate directory: `cargo new crates/my-crate --lib`
 2. Add it to the root `Cargo.toml` workspace members list.
 3. Set `RUST_TEMPLATE_PUBLISH_PACKAGES` to include the new crate in publish order.
-4. Run `make ci` to verify everything links.
+4. Run `make fmt-check` and `make lint`, then check the exact pushed commit's hosted CI results for the workspace build and tests.
 
 ### Why does `make template-check` fail?
 

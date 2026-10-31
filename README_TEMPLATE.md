@@ -116,17 +116,18 @@ If this repository is primarily a CLI or service, replace this section with the 
 - Rust 1.97.1 or later (development is pinned to Rust 1.99.0)
 - Additional system dependencies if any
 
-### Building
+### Local Development Checks
 
 ```bash
 git clone https://github.com/ThreatFlux/PROJECT_NAME.git
 cd PROJECT_NAME
 
 make dev-setup
-make build
-make test
-make ci
+make fmt-check
+make lint
 ```
+
+GitHub CI runs the tests, builds, coverage and security suites on the pushed commit.
 
 ### Makefile Targets
 

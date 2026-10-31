@@ -2,9 +2,10 @@ name: Security
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, "release/**", "automation/release-v**"]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, "release/**"]
+  merge_group:
   schedule:
     - cron: "0 3 * * 1"
   workflow_dispatch:

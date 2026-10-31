@@ -1,7 +1,7 @@
 name: Release
 
-# Read-only by default; jobs that create the tag or the GitHub release request
-# contents: write explicitly.
+# Read-only by default; only the job that creates or updates the GitHub
+# Release requests contents: write. A real run requires an existing tag.
 permissions:
   contents: read
 
@@ -43,14 +43,12 @@ jobs:
     name: Prepare Release
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     permissions:
-      # Manual dispatches create the release tag through the API.
-      contents: write
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      # Every job builds the workflow's own commit: the pushed tag, or the head of
-      # the branch or tag chosen with `gh workflow run --ref`. There is no input
-      # for building some other revision.
+      # Dry runs inspect protected main. Real releases require the existing
+      # tag's commit so a dispatch cannot tag an arbitrary branch.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,6 +76,21 @@ jobs:
             exit 1
           fi
 
+      - name: Validate release ref
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$DRY_RUN" == true ]]; then
+            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+              echo "::error::Dry runs must use protected main."
+              exit 1
+            fi
+          elif [[ "$GITHUB_REF" != "refs/tags/v$VERSION" ]]; then
+            echo "::error::Real releases must run from the existing tag v$VERSION."
+            exit 1
+          fi
+
       - name: Validate manifest version
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -88,7 +101,7 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure release tag
+      - name: Verify existing release tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -98,39 +111,13 @@ jobs:
           TARGET_SHA="$(git rev-parse HEAD)"
 
           if [[ "${DRY_RUN}" == "true" ]]; then
-            echo "Dry run: building ${TARGET_SHA} as ${TAG} without creating or checking the tag"
+            echo "Dry run: building ${TARGET_SHA} as ${TAG} without checking a release tag"
             exit 0
           fi
-
-          if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
-            TAG_SHA="$(git rev-parse "${TAG}^{commit}")"
-            if [[ "${TAG_SHA}" != "${TARGET_SHA}" ]]; then
-              echo "Existing tag ${TAG} points to ${TAG_SHA}, expected ${TARGET_SHA}"
-              exit 1
-            fi
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # The checkout keeps no credentials and has no git identity, so create
-            # the annotated tag through the API with the workflow token.
-            TAG_OBJECT_SHA="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
-              -f tag="${TAG}" -f message="Release ${TAG}" -f object="${TARGET_SHA}" -f type=commit \
-              --jq '.sha')"
-            if gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/${TAG}" -f sha="${TAG_OBJECT_SHA}" --silent; then
-              echo "Created ${TAG} at ${TARGET_SHA}; dispatch docker.yml for it separately"
-            else
-              # Another run may have created the tag after checkout; accept it only
-              # when it resolves to the commit being released.
-              if ! REMOTE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/refs/tags/${TAG}" --jq '.sha' 2>/dev/null)"; then
-                REMOTE_SHA=""
-              fi
-              if [[ "${REMOTE_SHA}" != "${TARGET_SHA}" ]]; then
-                echo "Could not create ${TAG}; remote tag resolves to '${REMOTE_SHA:-nothing}', expected ${TARGET_SHA}"
-                exit 1
-              fi
-              echo "${TAG} already exists at ${TARGET_SHA}"
-            fi
-          else
-            echo "Missing expected release tag ${TAG}"
+          TAG_SHA="$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}")"
+          REMOTE_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/refs/tags/${TAG}" --jq .sha)"
+          if [[ "${TAG_SHA}" != "${TARGET_SHA}" || "${REMOTE_SHA}" != "${TARGET_SHA}" ]]; then
+            echo "::error::${TAG} must resolve to checked-out commit ${TARGET_SHA} locally and remotely (local ${TAG_SHA}, remote ${REMOTE_SHA})."
             exit 1
           fi
 
