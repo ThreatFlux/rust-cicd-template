@@ -363,6 +363,8 @@ jobs:
             echo "::error::main moved; wait for the new exact-head run."
             exit 1
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           OLD_SHA=""
           if REMOTE_LINE="$(git ls-remote --exit-code origin "refs/heads/$BRANCH")"; then
             OLD_SHA="$(cut -f1 <<< "$REMOTE_LINE")"
@@ -418,8 +420,6 @@ jobs:
               *) echo "::error::Unexpected release PR change: $file"; exit 1 ;;
             esac
           done < <(git diff --cached --name-only "$TARGET_SHA")
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           if ! git diff --cached --quiet HEAD || git rev-parse -q --verify MERGE_HEAD >/dev/null; then
             git -c core.hooksPath=/dev/null commit -m "chore: release v$VERSION"
           fi

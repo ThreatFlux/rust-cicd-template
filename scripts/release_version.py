@@ -206,21 +206,42 @@ def update_lockfile(path: Path, new_version: str, internal_names: set[str]) -> b
         return False
     original = path.read_text(encoding="utf-8")
     blocks = re.split(r"(?m)(?=^[ \t]*\[\[[ \t]*package[ \t]*\]\][ \t]*(?:#.*)?$)", original)
+    packages = [tomllib.loads(block).get("package", []) for block in blocks]
+    local_refs = {
+        f"{package['name']} {package['version']}": f"{package['name']} {new_version}"
+        for group in packages
+        for package in group
+        if package.get("name") in internal_names and "source" not in package
+    }
+    registry_refs = {
+        f"{package['name']} {package['version']}"
+        for group in packages
+        for package in group
+        if "source" in package
+    }
     for idx, block in enumerate(blocks):
-        packages = tomllib.loads(block).get("package", [])
-        if not packages:
+        if not packages[idx]:
             continue
-        package = packages[0]
-        if package.get("name") not in internal_names or "source" in package:
-            continue
-        blocks[idx], count = re.subn(
-            r'(?m)^([ \t]*version[ \t]*=[ \t]*)(["\'])([^"\'\r\n]+)\2',
-            lambda match: f"{match[1]}{match[2]}{new_version}{match[2]}",
-            block,
-            count=1,
-        )
-        if count != 1:
-            raise SystemExit(f"{path} has no version for {package['name']}")
+        package = packages[idx][0]
+        if package.get("name") in internal_names and "source" not in package:
+            block, count = re.subn(
+                r'(?m)^([ \t]*version[ \t]*=[ \t]*)(["\'])([^"\'\r\n]+)\2',
+                lambda match: f"{match[1]}{match[2]}{new_version}{match[2]}",
+                block,
+                count=1,
+            )
+            if count != 1:
+                raise SystemExit(f"{path} has no version for {package['name']}")
+        for dependency in package.get("dependencies", []):
+            if dependency not in local_refs:
+                continue
+            if dependency in registry_refs:
+                raise SystemExit(f"{path} has ambiguous local/registry dependency {dependency}")
+            old_ref = f'"{dependency}"'
+            if block.count(old_ref) != 1:
+                raise SystemExit(f"{path} cannot locate dependency reference {dependency}")
+            block = block.replace(old_ref, f'"{local_refs[dependency]}"')
+        blocks[idx] = block
     updated = "".join(blocks)
     if updated != original:
         path.write_text(updated, encoding="utf-8")

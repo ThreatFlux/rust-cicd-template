@@ -60,6 +60,9 @@ jobs:
       - name: Check bootstrap placeholders
         run: python3 scripts/check_template_placeholders.py
 
+      - name: Check release versioning
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
