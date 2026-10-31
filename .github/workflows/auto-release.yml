@@ -334,7 +334,7 @@ jobs:
       - name: Checkout exact main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.check.outputs.target_sha }}
+          ref: main
           fetch-depth: 0
           persist-credentials: false
 
@@ -348,6 +348,10 @@ jobs:
           VERSION: ${{ needs.check.outputs.next_version }}
         run: |
           set -euo pipefail
+          if [[ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]]; then
+            echo "::error::main moved since release evaluation."
+            exit 1
+          fi
           BRANCH="automation/release-v$VERSION"
           AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
           echo "::add-mask::${AUTH_HEADER#AUTHORIZATION: basic }"
@@ -443,7 +447,7 @@ jobs:
       - name: Checkout exact main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.check.outputs.target_sha }}
+          ref: main
           fetch-depth: 0
           persist-credentials: false
 
@@ -648,7 +652,7 @@ jobs:
       - name: Checkout accepted main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.check.outputs.target_sha }}
+          ref: main
           fetch-depth: 0
           persist-credentials: false
 
