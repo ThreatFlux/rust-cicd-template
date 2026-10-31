@@ -40,9 +40,11 @@ on:
 permissions:
   contents: read
 
+# Candidate preparation runs in the default-branch workflow context. None of
+# these jobs use caches, so withhold cache tokens entirely.
+cache-mode: none
+
 env:
-  RUST_VERSION: 1.99.0
-  RUSTUP_TOOLCHAIN: 1.99.0
   DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
 
 jobs:
@@ -376,19 +378,14 @@ jobs:
             git switch -c "$BRANCH" "$TARGET_SHA"
           fi
           echo "old_sha=$OLD_SHA" >> "$GITHUB_OUTPUT"
-          # Inspect the existing branch before cargo sees its manifests. A PR
-          # branch may only carry the version files relative to current main.
+          # Inspect the existing branch before the version parser sees its
+          # manifests. A PR branch may only carry version files relative to main.
           while IFS= read -r file; do
             case "$file" in
               Cargo.toml|*/Cargo.toml|Cargo.lock|fuzz/Cargo.lock) ;;
               *) echo "::error::Unexpected existing release branch change: $file"; exit 1 ;;
             esac
           done < <(git diff --name-only "$TARGET_SHA")
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Update manifests and lockfiles on read-only runner
         id: candidate
@@ -402,7 +399,8 @@ jobs:
           else
             python3 scripts/release_version.py set "$VERSION"
           fi
-          cargo check --workspace --all-features
+          # The release PR's CI checks the candidate. Avoid running package
+          # build scripts in this default-branch workflow context.
           python3 scripts/release_version.py verify "$VERSION"
           git add -A
           git diff --cached --check "$TARGET_SHA"
