@@ -48,6 +48,34 @@ Runner defaults:
 - `RUST_TEMPLATE_RUNNER_MACOS_ARM64`
 - `RUST_TEMPLATE_RUNNER_MACOS_X64`
 
+## Fuzzing
+
+- Adapt `fuzz/Cargo.toml`'s root path dependency and `fuzz/fuzz_targets/add.rs`
+  when renaming or replacing the example library. Keep the nested `[workspace]`
+  and separate `fuzz/Cargo.lock`; do not add fuzz dependencies to the root graph.
+- Replace the demonstration oracle with assertions for your actual public API.
+  The supplied harness checks only representable `add(i32, i32)` sums against
+  `checked_add`. It skips overflowing pairs and covers neither the CLI nor
+  downstream applications. Decide an overflow contract explicitly before
+  extending that coverage.
+- Maintain committed eight-byte, little-endian seed pairs in `fuzz/seeds/add/`.
+  Retain zero, negative, cancellation, and representable boundary cases while
+  adding regressions. Keep generated corpus, coverage, artifacts, and targets
+  ignored; preserve curated regression inputs in the seed directory.
+- Verify `.github/workflows/fuzz.yml` on the exact pushed commit: pinned nightly
+  and cargo-fuzz installation, locked dependencies, harness lint/build, and the
+  60-second PR campaign must succeed. Confirm the weekly 600-second campaign is
+  enabled and that failure reproducers can be downloaded for 30 days. This job
+  uses GitHub-hosted `ubuntu-24.04`; review that choice for your project.
+- Update the dated nightly, cargo-fuzz version, action SHAs, and fuzz lockfile
+  deliberately. Root package version bumps also require refreshing the isolated
+  lockfile. Preserve read-only permissions, credential-free checkout, timeouts,
+  and reproducer retention.
+- Require existing CI and Security results alongside Fuzz. A successful fuzz run
+  alone does not prove Scorecard recognition: inspect a fresh default-branch
+  report and the fuzzing alert after integration. See
+  [CONTRIBUTING.md](../CONTRIBUTING.md#fuzzing) for scope and crash replay.
+
 ## Release Token
 
 Auto Release works with the workflow `GITHUB_TOKEN` and no setup. To have a GitHub App push

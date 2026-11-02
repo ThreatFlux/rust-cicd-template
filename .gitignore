@@ -1,4 +1,8 @@
 /target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
 
 # Note: Cargo.lock IS committed for applications (reproducible builds)
 # Uncomment below for library-only crates:
