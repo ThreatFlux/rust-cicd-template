@@ -1,23 +1,14 @@
 name: Auto Release
 
-# Which token cuts the release decides how release.yml and docker.yml start:
-# - GitHub App (optional): when the App ID variable and private key secret below
-#   are both set, the release commit, tag and GitHub Release are written with an
-#   App installation token. That tag push is an ordinary push, so the
-#   `on: push: tags` triggers of release.yml and docker.yml start them, and this
-#   workflow dispatches nothing (dispatching too would run each of them twice).
-# - GITHUB_TOKEN (fallback, no App configured): a tag pushed with GITHUB_TOKEN
-#   starts no workflows, so Create Release dispatches release.yml and docker.yml
-#   for the new tag.
-# The App is the repository pair (variable RUST_TEMPLATE_RELEASE_APP_ID and
-# secret RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY) when either of them is set, and
-# otherwise the ThreatFlux organization pair (TF_AUTOMATION_APP_ID and
-# TF_AUTOMATION_APP_PRIVATE_KEY). The two pairs are never mixed, and a pair with
-# only one value set fails the run. See docs/RELEASING.md#release-token.
-
-# Key on the head repository too, so a fork PR whose branch is named "main"
-# cannot cancel an in-progress release run for this repository's main. Dry runs
-# get their own group, so a rehearsal can never cancel a real release run.
+# A release has two phases: propose a version bump PR, then tag its reviewed
+# merge commit after CI and Security pass for that exact main push. No token
+# used by this workflow pushes to main.
+#
+# The repository App pair takes precedence over the organization pair. A
+# half-set pair fails; otherwise GITHUB_TOKEN is the fallback. An App-created
+# PR runs its normal PR checks. A GITHUB_TOKEN-created PR needs a maintainer to
+# approve its waiting workflow runs (see docs/RELEASING.md). Candidate code
+# runs only in a read-only job; a fresh runner publishes the verified commit.
 concurrency:
   group: auto-release-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: true
@@ -32,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       version_bump:
-        description: Version bump type
+        description: Version bump to propose in a PR
         required: true
         default: patch
         type: choice
@@ -41,29 +32,30 @@ on:
           - minor
           - major
       dry_run:
-        description: Report the version and the release steps without committing, tagging, releasing or dispatching
+        description: Report the candidate or pending tag without writing to GitHub
         required: false
         default: false
         type: boolean
 
-# Read-only by default; only the release job gets write scopes.
 permissions:
   contents: read
 
+# Candidate preparation runs in the default-branch workflow context. None of
+# these jobs use caches, so withhold cache tokens entirely.
+cache-mode: none
+
 env:
-  RUST_VERSION: 1.99.0
-  RUSTUP_TOOLCHAIN: 1.99.0
   DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
 
 jobs:
   check:
     name: Check for Release
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    # workflow_run also fires for pull_request runs, including fork PRs whose
-    # branch is named "main"; only react to successful pushes to this repo's main.
+    # workflow_run also fires for fork PRs with a branch named main. A manual
+    # dispatch must use the protected main workflow, not an arbitrary ref.
     if: >-
       github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
@@ -72,168 +64,174 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     outputs:
-      should_release: ${{ steps.check.outputs.should_release }}
+      mode: ${{ steps.decide.outputs.mode }}
+      current_version: ${{ steps.decide.outputs.current_version }}
+      next_version: ${{ steps.decide.outputs.next_version }}
+      target_sha: ${{ steps.target.outputs.sha }}
       release_app: ${{ steps.release_app.outputs.use_app }}
       release_app_source: ${{ steps.release_app.outputs.source }}
       release_app_id: ${{ steps.release_app.outputs.app_id }}
-      next_version: ${{ steps.version.outputs.next_version }}
-      current_version: ${{ steps.version.outputs.current_version }}
-      target_sha: ${{ steps.target.outputs.sha }}
     steps:
-      # Check out the workflow's own commit (for workflow_run and schedule, the
-      # current tip of the default branch), never the triggering run's head SHA.
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          ref: main
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Determine target SHA
+      - name: Verify exact main tip
         id: target
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           TARGET_SHA="$(git rev-parse HEAD)"
-          if [[ "${EVENT_NAME}" == "workflow_run" && "${TRIGGER_SHA}" != "${TARGET_SHA}" ]]; then
-            # main moved on; the CI status check below only passes once the
-            # new tip's own CI and Security runs have succeeded.
-            echo "Triggering run was for ${TRIGGER_SHA}; evaluating main tip ${TARGET_SHA}"
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [[ "$TARGET_SHA" != "$MAIN_SHA" ]]; then
+            echo "::error::main moved to $MAIN_SHA during checkout; rerun on the new tip."
+            exit 1
           fi
-          echo "sha=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
+          echo "sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Check CI status
+      - name: Check exact push runs
         id: ci_status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
-          CI_STATUS=$(gh run list --workflow=ci.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
-          SECURITY_STATUS=$(gh run list --workflow=security.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
-          echo "Push run conclusions for ${TARGET_SHA}: CI '${CI_STATUS}', Security '${SECURITY_STATUS}' (empty: no push run has completed)"
-          if [[ "$CI_STATUS" == "success" ]] && [[ "$SECURITY_STATUS" == "success" ]]; then
+          set -euo pipefail
+          CI_STATUS="$(gh run list --workflow=ci.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')"
+          SECURITY_STATUS="$(gh run list --workflow=security.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')"
+          echo "Push run conclusions for $TARGET_SHA: CI '$CI_STATUS', Security '$SECURITY_STATUS'"
+          if [[ "$CI_STATUS" == success && "$SECURITY_STATUS" == success ]]; then
             echo "all_passed=true" >> "$GITHUB_OUTPUT"
           else
             echo "all_passed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check for changes
-        id: check
+      - name: Decide whether to propose or tag
+        id: decide
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_PASSED: ${{ steps.ci_status.outputs.all_passed }}
-        run: |
-          set -euo pipefail
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          SINCE="${LAST_TAG:-the first commit}"
-          if [ -z "$LAST_TAG" ]; then
-            LAST_TAG=$(git rev-list --max-parents=0 HEAD)
-          fi
-
-          CHANGES=$(git log "$LAST_TAG..HEAD" --oneline --no-merges | wc -l)
-          FEAT_COUNT=$(git log "$LAST_TAG..HEAD" --grep="^feat" --oneline | wc -l)
-          FIX_COUNT=$(git log "$LAST_TAG..HEAD" --grep="^fix" --oneline | wc -l)
-          BREAKING_BODY_COUNT=$(git log "$LAST_TAG..HEAD" --grep="BREAKING CHANGE" --oneline | wc -l)
-          BREAKING_SUBJECT_COUNT=$(git log "$LAST_TAG..HEAD" --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
-          BREAKING_COUNT=$((BREAKING_BODY_COUNT + BREAKING_SUBJECT_COUNT))
-          echo "Commits since ${SINCE}: ${CHANGES} (feat: ${FEAT_COUNT}, fix: ${FIX_COUNT}, breaking: ${BREAKING_COUNT})"
-
-          # What a completed-run or scheduled trigger decides for this commit.
-          if [[ "${CI_PASSED}" != "true" ]]; then
-            AUTOMATIC=false
-            REASON="CI and Security have not both succeeded on a push of this commit"
-          elif [[ $CHANGES -eq 0 ]]; then
-            AUTOMATIC=false
-            REASON="there are no commits since ${SINCE}"
-          elif [[ $BREAKING_COUNT -gt 0 ]] || [[ $FEAT_COUNT -gt 0 ]] || [[ $FIX_COUNT -gt 0 ]]; then
-            AUTOMATIC=true
-            REASON="there are feat, fix or breaking commits since ${SINCE}"
-          else
-            AUTOMATIC=false
-            REASON="no commit since ${SINCE} is a feat, fix or breaking change"
-          fi
-
-          if [[ "$AUTOMATIC" == "true" ]]; then
-            DECISION="release"
-          else
-            DECISION="no release"
-          fi
-          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "Decision: release (manual dispatch). An automatic run would decide: ${DECISION}, because ${REASON}."
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Decision: ${DECISION}, because ${REASON}."
-            echo "should_release=${AUTOMATIC}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Determine version
-        id: version
-        if: steps.check.outputs.should_release == 'true'
-        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
           EVENT_NAME: ${{ github.event_name }}
-          REQUESTED_BUMP: ${{ github.event.inputs.version_bump }}
+          REQUESTED_BUMP: ${{ inputs.version_bump }}
         run: |
           set -euo pipefail
           CURRENT_VERSION="$(python3 scripts/release_version.py current)"
           if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Cargo.toml version ${CURRENT_VERSION} is not MAJOR.MINOR.PATCH; release pre-release versions by hand (see docs/RELEASING.md)."
+            echo "::error::Release pre-release versions manually (see docs/RELEASING.md)."
             exit 1
           fi
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-
-          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
-            BUMP_TYPE="${REQUESTED_BUMP}"
-            BUMP_SOURCE="chosen in the dispatch"
-          else
-            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-            BUMP_SOURCE="from the commits since ${LAST_TAG:-the first commit}"
-            if [ -z "$LAST_TAG" ]; then
-              LAST_TAG=$(git rev-list --max-parents=0 HEAD)
-            fi
-
-            BREAKING_BODY=$(git log "$LAST_TAG..HEAD" --grep="BREAKING CHANGE" --oneline | wc -l)
-            BREAKING_SUBJECT=$(git log "$LAST_TAG..HEAD" --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)
-            BREAKING=$((BREAKING_BODY + BREAKING_SUBJECT))
-            FEAT=$(git log "$LAST_TAG..HEAD" --grep="^feat" --oneline | wc -l)
-
-            if [[ $BREAKING -gt 0 ]]; then
-              BUMP_TYPE="major"
-            elif [[ $FEAT -gt 0 ]]; then
-              BUMP_TYPE="minor"
-            else
-              BUMP_TYPE="patch"
-            fi
+          if [[ "$CI_PASSED" != true ]]; then
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "Waiting for successful CI and Security push runs on $TARGET_SHA."
+            exit 0
           fi
 
-          case $BUMP_TYPE in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
-            *) echo "::error::Unknown version bump '${BUMP_TYPE}'"; exit 1 ;;
-          esac
-          NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
-
-          # Stop before the release job writes anything if the manifest is behind
-          # the latest release tag: the bump would land at or below a version that
-          # is already tagged, and the tag push would fail after main had moved.
-          LATEST_TAG=$(git tag --list 'v[0-9]*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
-          if [[ -n "$LATEST_TAG" ]] && [[ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "${LATEST_TAG#v}" | sort -V | tail -n 1)" != "$CURRENT_VERSION" ]]; then
-            echo "::error::Cargo.toml version ${CURRENT_VERSION} is lower than the latest release tag ${LATEST_TAG}. Set the manifest version to ${LATEST_TAG#v}, then re-run."
+          LATEST_TAG="$(git tag --list 'v[0-9]*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)"
+          if [[ -n "$LATEST_TAG" && "$(printf '%s\n%s\n' "$CURRENT_VERSION" "${LATEST_TAG#v}" | sort -V | head -n 1)" != "${LATEST_TAG#v}" ]]; then
+            echo "::error::Cargo.toml version $CURRENT_VERSION is behind $LATEST_TAG."
             exit 1
           fi
 
-          echo "Version: ${CURRENT_VERSION} -> ${NEXT_VERSION} (${BUMP_TYPE} bump ${BUMP_SOURCE})"
-          echo "next_version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+          # The GitHub API associates the accepted main SHA with its merged PR.
+          # merge_commit_sha covers merge, squash and rebase merges. Source
+          # cannot establish effective review rules; those are a settings gate.
+          RELEASE_BRANCH="automation/release-v$CURRENT_VERSION"
+          PR_NUMBERS="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/pulls" |
+            jq -r --arg sha "$TARGET_SHA" --arg branch "$RELEASE_BRANCH" --arg repo "$GITHUB_REPOSITORY" '
+              [.[] | select(.merged_at != null and .merge_commit_sha == $sha and
+                .base.ref == "main" and .head.ref == $branch and
+                .head.repo.full_name == $repo) | .number] | join(" ")')"
 
-      # Decided before Create Release can start, and in every dry run. The
-      # repository pair wins when either of its values is set, so it is never
-      # mixed with the organization pair, and a pair with only one value set
-      # fails here instead of silently falling back to GITHUB_TOKEN.
+          if [[ -n "$LATEST_TAG" && "$CURRENT_VERSION" != "${LATEST_TAG#v}" ]] || [[ -z "$LATEST_TAG" && -n "$PR_NUMBERS" ]]; then
+            if [[ ! "$PR_NUMBERS" =~ ^[0-9]+$ ]]; then
+              echo "::error::Version $CURRENT_VERSION is ahead of the latest tag, but $TARGET_SHA is not the unique merged release PR commit. Stop for maintainer recovery."
+              exit 1
+            fi
+            python3 scripts/release_version.py verify "$CURRENT_VERSION"
+            echo "mode=tag" >> "$GITHUB_OUTPUT"
+            echo "next_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "Reviewed release PR #$PR_NUMBERS merged at $TARGET_SHA; v$CURRENT_VERSION awaits a tag."
+            exit 0
+          fi
+
+          if [[ -n "$PR_NUMBERS" ]]; then
+            TAG_SHA="$(git rev-parse -q --verify "refs/tags/v${CURRENT_VERSION}^{commit}" 2>/dev/null || true)"
+            if [[ "$TAG_SHA" == "$TARGET_SHA" ]]; then
+              echo "mode=tag" >> "$GITHUB_OUTPUT"
+              echo "next_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+              echo "v$CURRENT_VERSION already tags accepted release PR #$PR_NUMBERS at $TARGET_SHA; checking release completion."
+              exit 0
+            fi
+            echo "::error::Release PR #$PR_NUMBERS is at main, but its version tag does not identify this commit."
+            exit 1
+          fi
+
+          SINCE="$LATEST_TAG"
+          if [[ -z "$SINCE" ]]; then
+            SINCE="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          CHANGES="$(git log "$SINCE..HEAD" --oneline --no-merges | wc -l)"
+          FEAT="$(git log "$SINCE..HEAD" --grep='^feat' --oneline | wc -l)"
+          FIX="$(git log "$SINCE..HEAD" --grep='^fix' --oneline | wc -l)"
+          BREAKING_BODY="$(git log "$SINCE..HEAD" --grep='BREAKING CHANGE' --oneline | wc -l)"
+          BREAKING_SUBJECT="$(git log "$SINCE..HEAD" --pretty=format:%s --no-merges | grep -Ec '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:' || true)"
+          BREAKING=$((BREAKING_BODY + BREAKING_SUBJECT))
+          echo "Since ${LATEST_TAG:-the first commit}: $CHANGES commits (feat $FEAT, fix $FIX, breaking $BREAKING)."
+          if [[ "$EVENT_NAME" != workflow_dispatch && ( "$CHANGES" -eq 0 || ( "$FEAT" -eq 0 && "$FIX" -eq 0 && "$BREAKING" -eq 0 ) ) ]]; then
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "No automatic release is due."
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            BUMP="$REQUESTED_BUMP"
+          elif [[ "$BREAKING" -gt 0 ]]; then
+            BUMP=major
+          elif [[ "$FEAT" -gt 0 ]]; then
+            BUMP=minor
+          else
+            BUMP=patch
+          fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::Unknown version bump '$BUMP'"; exit 1 ;;
+          esac
+          NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
+          if git show-ref --verify --quiet "refs/tags/v$NEXT_VERSION"; then
+            echo "::error::v$NEXT_VERSION already exists."
+            exit 1
+          fi
+          # Do not open a second release PR if new commits changed the desired
+          # bump while an older version proposal is still under review.
+          OPEN_RELEASE_BRANCHES="$(gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f base=main -f per_page=100 \
+            --jq '.[] | select(.head.repo.full_name == .base.repo.full_name and
+              (.head.ref | startswith("automation/release-v"))) | .head.ref')"
+          if [[ -n "$OPEN_RELEASE_BRANCHES" ]]; then
+            while IFS= read -r OPEN_BRANCH; do
+              if [[ "$OPEN_BRANCH" != "automation/release-v$NEXT_VERSION" ]]; then
+                echo "::error::Open release PR $OPEN_BRANCH targets another version. Reconcile or close it before proposing v$NEXT_VERSION."
+                exit 1
+              fi
+            done <<< "$OPEN_RELEASE_BRANCHES"
+          fi
+          echo "mode=propose" >> "$GITHUB_OUTPUT"
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Propose $CURRENT_VERSION -> $NEXT_VERSION ($BUMP) from $TARGET_SHA."
+
       - name: Select release token
         id: release_app
-        if: env.DRY_RUN == 'true' || steps.check.outputs.should_release == 'true'
+        if: env.DRY_RUN == 'true' || steps.decide.outputs.mode != 'none'
         env:
           REPOSITORY_APP_ID: ${{ vars.RUST_TEMPLATE_RELEASE_APP_ID }}
           HAS_REPOSITORY_APP_KEY: ${{ secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY != '' }}
@@ -241,261 +239,597 @@ jobs:
           HAS_ORGANIZATION_APP_KEY: ${{ secrets.TF_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [[ -n "${REPOSITORY_APP_ID}" || "${HAS_REPOSITORY_APP_KEY}" == "true" ]]; then
-            SOURCE="repository"
-            PAIR="variable RUST_TEMPLATE_RELEASE_APP_ID and secret RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY"
-            APP_ID="${REPOSITORY_APP_ID}"
-            HAS_KEY="${HAS_REPOSITORY_APP_KEY}"
-          elif [[ -n "${ORGANIZATION_APP_ID}" || "${HAS_ORGANIZATION_APP_KEY}" == "true" ]]; then
-            SOURCE="organization"
-            PAIR="variable TF_AUTOMATION_APP_ID and secret TF_AUTOMATION_APP_PRIVATE_KEY"
-            APP_ID="${ORGANIZATION_APP_ID}"
-            HAS_KEY="${HAS_ORGANIZATION_APP_KEY}"
+          if [[ -n "$REPOSITORY_APP_ID" || "$HAS_REPOSITORY_APP_KEY" == true ]]; then
+            SOURCE=repository
+            APP_ID="$REPOSITORY_APP_ID"
+            HAS_KEY="$HAS_REPOSITORY_APP_KEY"
+          elif [[ -n "$ORGANIZATION_APP_ID" || "$HAS_ORGANIZATION_APP_KEY" == true ]]; then
+            SOURCE=organization
+            APP_ID="$ORGANIZATION_APP_ID"
+            HAS_KEY="$HAS_ORGANIZATION_APP_KEY"
           else
-            echo "Release token: GITHUB_TOKEN (no GitHub App configured)"
-            {
-              echo "use_app=false"
-              echo "source=none"
-            } >> "$GITHUB_OUTPUT"
+            echo "Release token: GITHUB_TOKEN."
+            echo "use_app=false" >> "$GITHUB_OUTPUT"
+            echo "source=none" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [[ -z "${APP_ID}" || "${HAS_KEY}" != "true" ]]; then
-            echo "::error::Only one of the ${PAIR} is set. Set both to release with that GitHub App, or neither to use the next option (repository pair, then organization pair, then GITHUB_TOKEN)."
+          if [[ -z "$APP_ID" || "$HAS_KEY" != true ]]; then
+            echo "::error::The $SOURCE release App ID/key pair is incomplete."
             exit 1
           fi
-          echo "Release token: GitHub App ${APP_ID} from the ${SOURCE} ${PAIR}"
-          {
-            echo "use_app=true"
-            echo "source=${SOURCE}"
-            echo "app_id=${APP_ID}"
-          } >> "$GITHUB_OUTPUT"
-
-      # A dry run mints the same App token a real release would, so a rehearsal
-      # proves the App ID, the private key and the installation's permissions.
-      # Nothing uses the token, and the action revokes it when the job ends.
-      - name: Create GitHub App installation token (dry run)
-        id: app_token
-        if: env.DRY_RUN == 'true' && steps.release_app.outputs.use_app == 'true'
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ steps.release_app.outputs.app_id }}
-          # Select step guarantees the chosen pair's key is set.
-          private-key: ${{ steps.release_app.outputs.source == 'repository' && secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
-          permission-contents: write
+          echo "Release token: $SOURCE GitHub App $APP_ID."
+          echo "use_app=true" >> "$GITHUB_OUTPUT"
+          echo "source=$SOURCE" >> "$GITHUB_OUTPUT"
+          echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
 
       - name: Report dry run
         if: env.DRY_RUN == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHOULD_RELEASE: ${{ steps.check.outputs.should_release }}
-          CURRENT_VERSION: ${{ steps.version.outputs.current_version }}
-          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
+          MODE: ${{ steps.decide.outputs.mode }}
+          CURRENT_VERSION: ${{ steps.decide.outputs.current_version }}
+          NEXT_VERSION: ${{ steps.decide.outputs.next_version }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
-          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+          APP_SOURCE: ${{ steps.release_app.outputs.source }}
+          APP_ID: ${{ steps.release_app.outputs.app_id }}
         run: |
           set -euo pipefail
-          # Create Release skips any target that is not the current tip of main.
-          MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
           {
-            if [[ -n "${APP_SLUG}" ]]; then
-              echo "Dry run: release token is the GitHub App ${APP_SLUG}; its installation token was minted with contents: write and is revoked unused."
+            echo "Dry run: main $MAIN_SHA; evaluated $TARGET_SHA; mode ${MODE:-none}."
+            if [[ "$APP_SOURCE" != none ]]; then
+              echo "Token: $APP_SOURCE GitHub App $APP_ID (installation checked in a separate dry-run job)."
             else
-              echo "Dry run: release token is GITHUB_TOKEN; no GitHub App is configured."
+              echo "Token: GITHUB_TOKEN fallback."
             fi
-            if [[ "$SHOULD_RELEASE" == "true" ]] && [[ "$MAIN_SHA" != "$TARGET_SHA" ]]; then
-              echo "Dry run: would not release v${NEXT_VERSION}: ${TARGET_SHA} is not the tip of main (${MAIN_SHA}), so Create Release would skip it as stale."
-            elif [[ "$SHOULD_RELEASE" == "true" ]]; then
-              TAG="v${NEXT_VERSION}"
-              # Bump this read-only checkout only to list the files a release would commit.
+            if [[ "$MAIN_SHA" != "$TARGET_SHA" ]]; then
+              echo "Main moved. A write run would stop before publishing."
+            elif [[ "$MODE" == propose ]]; then
               python3 scripts/release_version.py set "$NEXT_VERSION"
-              echo "Dry run: would release ${TAG} (${CURRENT_VERSION} -> ${NEXT_VERSION}) from ${TARGET_SHA}."
-              if [[ -n "${APP_SLUG}" ]]; then
-                echo "- next action: as ${APP_SLUG}[bot], commit \"chore: release ${TAG}\" to main, push the annotated tag ${TAG} and create its GitHub Release; the tag push starts release.yml and docker.yml, so nothing would be dispatched"
+              echo "Would propose v$NEXT_VERSION in an automation/release-v$NEXT_VERSION PR from $TARGET_SHA."
+              git diff --name-only | while IFS= read -r file; do echo "- candidate changes $file"; done
+            elif [[ "$MODE" == tag ]]; then
+              python3 scripts/release_version.py verify "$CURRENT_VERSION"
+              if git show-ref --verify --quiet "refs/tags/v$CURRENT_VERSION"; then
+                echo "Would reconcile existing v$CURRENT_VERSION at accepted main commit $TARGET_SHA."
               else
-                echo "- next action: commit \"chore: release ${TAG}\" to main, push the annotated tag ${TAG}, create its GitHub Release and dispatch release.yml and docker.yml for ${TAG}, because a tag pushed with GITHUB_TOKEN starts no workflows"
+                echo "Would tag accepted main commit $TARGET_SHA as v$CURRENT_VERSION after rechecking its push runs and PR association."
               fi
-              git diff --name-only | while IFS= read -r file; do
-                echo "- would update ${file}"
-              done
-              git checkout -- .
-              if [[ -f Cargo.lock ]]; then
-                echo "- would update Cargo.lock if cargo check changes it"
-              fi
-              echo "- would refresh fuzz/Cargo.lock for the new root package version"
-              # The notes Create Release would give the GitHub Release, from the
-              # same script and commit. The script logs their source on stderr.
-              python3 scripts/release_notes.py "${NEXT_VERSION}" --output "${RUNNER_TEMP}/release_notes.md"
-              echo "- would publish these release notes:"
-              echo
-              cat "${RUNNER_TEMP}/release_notes.md"
-              echo
+              python3 scripts/release_notes.py "$CURRENT_VERSION" --output "$RUNNER_TEMP/release_notes.md"
+              cat "$RUNNER_TEMP/release_notes.md"
             else
-              echo "Dry run: would not release ${TARGET_SHA}."
+              echo "Would take no release action."
             fi
-            echo "- nothing was written to the repository: no commit, tag, GitHub Release or workflow dispatch"
+            echo "No branch, PR, tag, GitHub Release or workflow dispatch was written."
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-  release:
-    name: Create Release
+  dry_run_app:
+    name: Check Release App (dry run)
     needs: check
-    # A dry run ends after the check job has reported what it would release.
-    if: needs.check.outputs.should_release == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
-    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-    # Both scopes are used only when no GitHub App is configured; the App token
-    # carries its own permissions.
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run && needs.check.outputs.release_app == 'true'
+    runs-on: ubuntu-latest
     permissions:
-      # Push the release commit and tag, and create the GitHub release.
-      contents: write
-      # Dispatch release.yml and docker.yml for the new tag.
-      actions: write
+      contents: read
     steps:
-      # No credentials are persisted, so `cargo check` below (which runs
-      # dependency build scripts) never sees a write token; Commit and tag
-      # passes one to git for its fetch and pushes only.
-      - name: Checkout
+      - name: Check App installation and requested permissions
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ needs.check.outputs.release_app_id }}
+          private-key: ${{ needs.check.outputs.release_app_source == 'repository' && secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+  prepare_candidate:
+    name: Prepare Release Candidate
+    needs: check
+    if: needs.check.outputs.mode == 'propose' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    outputs:
+      old_branch_sha: ${{ steps.branch.outputs.old_sha }}
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
+      candidate_tree: ${{ steps.candidate.outputs.tree }}
+    steps:
+      - name: Checkout exact main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.check.outputs.target_sha }}
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Verify active Rust compiler
-        shell: bash
-        run: |
-          rustc --version --verbose
-          cargo --version
-
-      - name: Update version
-        run: |
-          VERSION="${{ needs.check.outputs.next_version }}"
-          python3 scripts/release_version.py set "$VERSION"
-          cargo check --workspace --all-features
-          # The fuzz package has its own lockfile with the root path dependency.
-          cargo update --manifest-path fuzz/Cargo.toml -p rust-cicd-template
+      # A version branch is updated by a fast-forward push. When main moved,
+      # merge it into the PR branch without rewriting reviewed history.
+      - name: Prepare candidate branch
+        id: branch
         env:
-          VERSION: ${{ needs.check.outputs.next_version }}
-
-      # The CHANGELOG.md (root or docs/) section for the version when it has one,
-      # otherwise every commit since the previous release tag, grouped by type.
-      - name: Generate release notes
-        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ needs.check.outputs.target_sha }}
           VERSION: ${{ needs.check.outputs.next_version }}
         run: |
           set -euo pipefail
-          python3 scripts/release_notes.py "${VERSION}" --output release_notes.md
-          cat release_notes.md
+          if [[ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]]; then
+            echo "::error::main moved since release evaluation."
+            exit 1
+          fi
+          BRANCH="automation/release-v$VERSION"
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${AUTH_HEADER#AUTHORIZATION: basic }"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          export GIT_CONFIG_VALUE_0="$AUTH_HEADER"
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
+          if [[ "$(git rev-parse origin/main)" != "$TARGET_SHA" ]]; then
+            echo "::error::main moved; wait for the new exact-head run."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          OLD_SHA=""
+          if REMOTE_LINE="$(git ls-remote --exit-code origin "refs/heads/$BRANCH")"; then
+            OLD_SHA="$(cut -f1 <<< "$REMOTE_LINE")"
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            if [[ "$(git rev-parse "origin/$BRANCH")" != "$OLD_SHA" ]]; then
+              echo "::error::$BRANCH moved during fetch."
+              exit 1
+            fi
+            git switch -c "$BRANCH" "origin/$BRANCH"
+            git merge --no-ff --no-commit "$TARGET_SHA"
+          else
+            RC="$?"
+            if [[ "$RC" -ne 2 ]]; then
+              echo "::error::Could not read $BRANCH (git exit $RC)."
+              exit "$RC"
+            fi
+            git switch -c "$BRANCH" "$TARGET_SHA"
+          fi
+          echo "old_sha=$OLD_SHA" >> "$GITHUB_OUTPUT"
+          # Inspect the existing branch before the version parser sees its
+          # manifests. A PR branch may only carry version files relative to main.
+          while IFS= read -r file; do
+            case "$file" in
+              Cargo.toml|*/Cargo.toml|Cargo.lock|fuzz/Cargo.lock) ;;
+              *) echo "::error::Unexpected existing release branch change: $file"; exit 1 ;;
+            esac
+          done < <(git diff --name-only "$TARGET_SHA")
 
-      # Minted right before the writes, so slow preparation cannot outlast the
-      # token's one-hour lifetime. Limited to this repository and to
-      # contents: write (the release commit, the tag and the GitHub Release).
+      - name: Update manifests and lockfiles on read-only runner
+        id: candidate
+        env:
+          VERSION: ${{ needs.check.outputs.next_version }}
+          TARGET_SHA: ${{ needs.check.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          if python3 scripts/release_version.py verify "$VERSION"; then
+            echo "Existing candidate already declares v$VERSION."
+          else
+            python3 scripts/release_version.py set "$VERSION"
+          fi
+          # The release PR's CI checks the candidate. Avoid running package
+          # build scripts in this default-branch workflow context.
+          python3 scripts/release_version.py verify "$VERSION"
+          git add -A
+          git diff --cached --check "$TARGET_SHA"
+          if git diff --cached --quiet "$TARGET_SHA"; then
+            echo "::error::Release PR has no version change against main."
+            exit 1
+          fi
+          while IFS= read -r file; do
+            case "$file" in
+              Cargo.toml|*/Cargo.toml|Cargo.lock|fuzz/Cargo.lock) ;;
+              *) echo "::error::Unexpected release PR change: $file"; exit 1 ;;
+            esac
+          done < <(git diff --cached --name-only "$TARGET_SHA")
+          if ! git diff --cached --quiet HEAD || git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            git -c core.hooksPath=/dev/null commit -m "chore: release v$VERSION"
+          fi
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          echo "sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          git bundle create "$RUNNER_TEMP/release-candidate.bundle" "refs/heads/automation/release-v$VERSION" "^$TARGET_SHA"
+
+      - name: Upload prepared commit
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-candidate-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-candidate.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  propose:
+    name: Publish Release PR
+    needs: [check, prepare_candidate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout exact main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download prepared commit
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-candidate-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-candidate
+
+      # This fresh runner runs only the validator checked out from main. It
+      # parses candidate Cargo data without checking out or executing it.
+      - name: Verify exact remote refs and prepared diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ needs.check.outputs.target_sha }}
+          OLD_BRANCH_SHA: ${{ needs.prepare_candidate.outputs.old_branch_sha }}
+          CANDIDATE_SHA: ${{ needs.prepare_candidate.outputs.candidate_sha }}
+          CANDIDATE_TREE: ${{ needs.prepare_candidate.outputs.candidate_tree }}
+          VERSION: ${{ needs.check.outputs.next_version }}
+        run: |
+          set -euo pipefail
+          BRANCH="automation/release-v$VERSION"
+          BUNDLE="$RUNNER_TEMP/release-candidate/release-candidate.bundle"
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ || ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ||
+                ! "$CANDIDATE_TREE" =~ ^[0-9a-f]{40}$ ||
+                ( -n "$OLD_BRANCH_SHA" && ! "$OLD_BRANCH_SHA" =~ ^[0-9a-f]{40}$ ) ]]; then
+            echo "::error::Invalid candidate metadata."
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]]; then
+            echo "::error::Checkout does not match the evaluated main commit."
+            exit 1
+          fi
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${AUTH_HEADER#AUTHORIZATION: basic }"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          export GIT_CONFIG_VALUE_0="$AUTH_HEADER"
+          git fetch origin +refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git rev-parse origin/main)" != "$TARGET_SHA" ||
+                "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" != "$TARGET_SHA" ]]; then
+            echo "::error::main moved after candidate preparation."
+            exit 1
+          fi
+          REMOTE_BRANCH_SHA=""
+          if REMOTE_LINE="$(git ls-remote --exit-code origin "refs/heads/$BRANCH")"; then
+            REMOTE_BRANCH_SHA="$(cut -f1 <<< "$REMOTE_LINE")"
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            if [[ "$(git rev-parse "origin/$BRANCH")" != "$REMOTE_BRANCH_SHA" ]]; then
+              echo "::error::$BRANCH moved during fetch."
+              exit 1
+            fi
+          else
+            RC="$?"
+            if [[ "$RC" -ne 2 ]]; then exit "$RC"; fi
+          fi
+          if [[ "$REMOTE_BRANCH_SHA" != "$OLD_BRANCH_SHA" ]]; then
+            echo "::error::$BRANCH moved after candidate preparation."
+            exit 1
+          fi
+          git bundle verify "$BUNDLE"
+          git fetch "$BUNDLE" "refs/heads/$BRANCH:refs/remotes/prepared/release"
+          if [[ "$(git rev-parse refs/remotes/prepared/release)" != "$CANDIDATE_SHA" ||
+                "$(git rev-parse "$CANDIDATE_SHA^{tree}")" != "$CANDIDATE_TREE" ]]; then
+            echo "::error::Prepared commit or tree differs from job output."
+            exit 1
+          fi
+          git merge-base --is-ancestor "$TARGET_SHA" "$CANDIDATE_SHA"
+          if [[ -n "$OLD_BRANCH_SHA" ]]; then
+            git merge-base --is-ancestor "$OLD_BRANCH_SHA" "$CANDIDATE_SHA"
+          fi
+          PARENTS="$(git show -s --format=%P "$CANDIDATE_SHA")"
+          if [[ -z "$OLD_BRANCH_SHA" ]]; then
+            EXPECTED_PARENTS="$TARGET_SHA"
+          elif [[ "$CANDIDATE_SHA" == "$OLD_BRANCH_SHA" ]]; then
+            EXPECTED_PARENTS="$PARENTS"
+          elif git merge-base --is-ancestor "$TARGET_SHA" "$OLD_BRANCH_SHA"; then
+            EXPECTED_PARENTS="$OLD_BRANCH_SHA"
+          else
+            EXPECTED_PARENTS="$OLD_BRANCH_SHA $TARGET_SHA"
+          fi
+          if [[ "$PARENTS" != "$EXPECTED_PARENTS" ]]; then
+            echo "::error::Prepared candidate has unexpected commit parents: $PARENTS"
+            exit 1
+          fi
+          if git diff --quiet "$TARGET_SHA" "$CANDIDATE_SHA"; then
+            echo "::error::Prepared candidate has no version change."
+            exit 1
+          fi
+          git diff --check "$TARGET_SHA" "$CANDIDATE_SHA"
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              Cargo.toml|*/Cargo.toml|Cargo.lock|fuzz/Cargo.lock) ;;
+              *) echo "::error::Unexpected candidate change: $file"; exit 1 ;;
+            esac
+            if [[ "$(git ls-tree "$CANDIDATE_SHA" -- "$file" | cut -d ' ' -f1)" != 100644 ]]; then
+              echo "::error::Candidate file is missing or not a regular Cargo file: $file"
+              exit 1
+            fi
+          done < <(git diff --name-only -z "$TARGET_SHA" "$CANDIDATE_SHA")
+          python3 scripts/validate_release_candidate.py \
+            --base "$TARGET_SHA" --candidate "$CANDIDATE_SHA" --version "$VERSION"
       - name: Create GitHub App installation token
         id: app_token
         if: needs.check.outputs.release_app == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ needs.check.outputs.release_app_id }}
-          # The check job guarantees the chosen pair's key is set.
           private-key: ${{ needs.check.outputs.release_app_source == 'repository' && secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
           permission-contents: write
+          permission-pull-requests: write
 
-      - name: Configure Git
+      - name: Push prepared commit and open or update PR
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+          TARGET_SHA: ${{ needs.check.outputs.target_sha }}
+          OLD_BRANCH_SHA: ${{ needs.prepare_candidate.outputs.old_branch_sha }}
+          CANDIDATE_SHA: ${{ needs.prepare_candidate.outputs.candidate_sha }}
+          VERSION: ${{ needs.check.outputs.next_version }}
         run: |
           set -euo pipefail
-          if [[ -n "${APP_SLUG}" ]]; then
-            # Author the release commit as the App's bot user.
-            BOT_LOGIN="${APP_SLUG}[bot]"
-            if BOT_ID="$(gh api "users/${BOT_LOGIN}" --jq .id)"; then
-              BOT_EMAIL="${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
-            else
-              echo "::warning::Could not look up ${BOT_LOGIN}; committing as ${BOT_LOGIN}@users.noreply.github.com"
-              BOT_EMAIL="${BOT_LOGIN}@users.noreply.github.com"
-            fi
-            git config user.name "${BOT_LOGIN}"
-            git config user.email "${BOT_EMAIL}"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="automation/release-v$VERSION"
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [[ "$MAIN_SHA" != "$TARGET_SHA" ]]; then
+            echo "::error::main moved to $MAIN_SHA; candidate was prepared from $TARGET_SHA."
+            exit 1
           fi
-          echo "Committing as $(git config user.name) <$(git config user.email)>"
-
-      - name: Commit and tag
-        id: publish_release_commit
-        env:
-          PUSH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.check.outputs.next_version }}"
-          TARGET_SHA="${{ needs.check.outputs.target_sha }}"
-
-          # Authenticate this step's git commands through the environment, the
-          # way actions/checkout does, without writing the token to .git/config.
-          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${PUSH_TOKEN}" | base64 | tr -d '\n')"
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
           echo "::add-mask::${AUTH_HEADER#AUTHORIZATION: basic }"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
-          export GIT_CONFIG_VALUE_0="${AUTH_HEADER}"
-
-          git fetch origin main --no-tags
-          CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
-          if [[ "${CURRENT_MAIN_SHA}" != "${TARGET_SHA}" ]]; then
-            echo "main advanced to ${CURRENT_MAIN_SHA}; skipping stale auto-release run for ${TARGET_SHA}"
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          find . -name Cargo.toml -not -path './target/*' -not -path './.git/*' -print0 | xargs -0 git add
-          if [[ -f Cargo.lock ]]; then
-            git add Cargo.lock
-          fi
-          git add fuzz/Cargo.lock
-          git commit -m "chore: release v$VERSION"
-          git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin HEAD:main
-          git push origin "v$VERSION"
-          echo "released=true" >> "$GITHUB_OUTPUT"
-
-      - name: Create or update GitHub Release
-        if: steps.publish_release_commit.outputs.released == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ needs.check.outputs.next_version }}"
-          TAG="v${VERSION}"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Release v${VERSION}" --notes-file release_notes.md
+          export GIT_CONFIG_VALUE_0="$AUTH_HEADER"
+          REMOTE_BRANCH_SHA=""
+          if REMOTE_LINE="$(git ls-remote --exit-code origin "refs/heads/$BRANCH")"; then
+            REMOTE_BRANCH_SHA="$(cut -f1 <<< "$REMOTE_LINE")"
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Release v${VERSION}" --notes-file release_notes.md
+            RC="$?"
+            if [[ "$RC" -ne 2 ]]; then exit "$RC"; fi
+          fi
+          if [[ "$REMOTE_BRANCH_SHA" != "$OLD_BRANCH_SHA" ]]; then
+            echo "::error::$BRANCH moved before push."
+            exit 1
+          fi
+          git merge-base --is-ancestor "$TARGET_SHA" "$CANDIDATE_SHA"
+          if [[ -n "$OLD_BRANCH_SHA" ]]; then
+            git merge-base --is-ancestor "$OLD_BRANCH_SHA" "$CANDIDATE_SHA"
+          fi
+          # The explicit empty expected SHA leases creation of an absent ref.
+          # A reset or deletion after ls-remote makes either lease fail.
+          git push --force-with-lease="refs/heads/$BRANCH:$OLD_BRANCH_SHA" \
+            origin "$CANDIDATE_SHA:refs/heads/$BRANCH"
+          PUSHED_LINE="$(git ls-remote --exit-code origin "refs/heads/$BRANCH")"
+          PUSHED_SHA="$(cut -f1 <<< "$PUSHED_LINE")"
+          if [[ "$PUSHED_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::$BRANCH is $PUSHED_SHA after push; expected $CANDIDATE_SHA."
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/release-pr.md" <<EOF
+          Automated version proposal from main commit $TARGET_SHA.
+
+          - Version: v$VERSION
+          - Review the manifest and lockfile changes.
+          - Require the normal PR checks and an independent approval.
+          - After merge, Auto Release tags the accepted main commit only after
+            its own CI and Security push runs succeed.
+
+          This PR does not create a tag or publish artifacts.
+          EOF
+          PR_NUMBERS="$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f base=main -f head="$GITHUB_REPOSITORY_OWNER:$BRANCH" |
+            jq -r '[.[] | .number] | join(" ")')"
+          if [[ -z "$PR_NUMBERS" ]]; then
+            PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "chore: release v$VERSION" --body-file "$RUNNER_TEMP/release-pr.md")"
+            PR_NUMBER="${PR_URL##*/}"
+          elif [[ "$PR_NUMBERS" =~ ^[0-9]+$ ]]; then
+            PR_NUMBER="$PR_NUMBERS"
+            gh pr edit "$PR_NUMBERS" --repo "$GITHUB_REPOSITORY" --title "chore: release v$VERSION" --body-file "$RUNNER_TEMP/release-pr.md"
+          else
+            echo "::error::Multiple open PRs use $BRANCH: $PR_NUMBERS"
+            exit 1
+          fi
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not identify the release PR from $PR_NUMBER."
+            exit 1
+          fi
+          PR_SHA="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
+          if [[ "$PR_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::PR head $PR_SHA differs from pushed candidate $CANDIDATE_SHA."
+            exit 1
           fi
 
-      # Tags pushed with GITHUB_TOKEN do not trigger other workflows, so start the
-      # tag-driven release (binaries, SBOM, crates.io) and container workflows here.
-      # An App-pushed tag has already started them; dispatching too would run
-      # each of them twice.
-      - name: Dispatch release and container workflows
-        if: steps.publish_release_commit.outputs.released == 'true' && steps.app_token.outcome != 'success'
+  tag:
+    name: Tag Reviewed Release
+    needs: check
+    if: needs.check.outputs.mode == 'tag' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      actions: write # GITHUB_TOKEN fallback dispatches tag workflows.
+      pull-requests: read
+    steps:
+      - name: Checkout accepted main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recheck accepted commit and make release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ needs.check.outputs.target_sha }}
           VERSION: ${{ needs.check.outputs.next_version }}
         run: |
           set -euo pipefail
-          TAG="v${VERSION}"
-          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" -f version="$VERSION"
-          gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [[ "$MAIN_SHA" != "$TARGET_SHA" || "$(git rev-parse HEAD)" != "$TARGET_SHA" ]]; then
+            echo "::error::main moved; stop before tagging. Reconcile the pending version with a maintainer."
+            exit 1
+          fi
+          python3 scripts/release_version.py verify "$VERSION"
+          CI_STATUS="$(gh run list --workflow=ci.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')"
+          SECURITY_STATUS="$(gh run list --workflow=security.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')"
+          if [[ "$CI_STATUS" != success || "$SECURITY_STATUS" != success ]]; then
+            echo "::error::CI ($CI_STATUS) and Security ($SECURITY_STATUS) must pass on the $TARGET_SHA main push."
+            exit 1
+          fi
+          PR_NUMBERS="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/pulls" |
+            jq -r --arg sha "$TARGET_SHA" --arg branch "automation/release-v$VERSION" --arg repo "$GITHUB_REPOSITORY" '
+              [.[] | select(.merged_at != null and .merge_commit_sha == $sha and
+                .base.ref == "main" and .head.ref == $branch and
+                .head.repo.full_name == $repo) | .number] | join(" ")')"
+          if [[ ! "$PR_NUMBERS" =~ ^[0-9]+$ ]]; then
+            echo "::error::No unique merged release PR identifies $TARGET_SHA."
+            exit 1
+          fi
+          echo "Accepted release PR #$PR_NUMBERS at $TARGET_SHA is eligible for tag/release reconciliation."
+          python3 scripts/release_notes.py "$VERSION" --output "$RUNNER_TEMP/release_notes.md"
 
-      - name: Report tag-triggered workflows (GitHub App)
-        if: steps.publish_release_commit.outputs.released == 'true' && steps.app_token.outcome == 'success'
+      - name: Create GitHub App installation token
+        id: app_token
+        if: needs.check.outputs.release_app == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ needs.check.outputs.release_app_id }}
+          private-key: ${{ needs.check.outputs.release_app_source == 'repository' && secrets.RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY || secrets.TF_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Create tag and GitHub Release
+        id: create_tag
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+          TARGET_SHA: ${{ needs.check.outputs.target_sha }}
+          VERSION: ${{ needs.check.outputs.next_version }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [[ "$MAIN_SHA" != "$TARGET_SHA" ]]; then
+            echo "::error::main moved to $MAIN_SHA; refusing to tag stale commit $TARGET_SHA."
+            exit 1
+          fi
+          CREATED=false
+          if EXISTING_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha 2>/dev/null)"; then
+            if [[ "$EXISTING_SHA" != "$TARGET_SHA" ]]; then
+              echo "::error::$TAG already points to $EXISTING_SHA, expected $TARGET_SHA."
+              exit 1
+            fi
+            echo "$TAG already points to $TARGET_SHA."
+          else
+            if [[ -n "$APP_SLUG" ]]; then
+              BOT_LOGIN="${APP_SLUG}[bot]"
+              if BOT_ID="$(gh api "users/$BOT_LOGIN" --jq .id)"; then
+                BOT_EMAIL="${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
+              else
+                echo "::warning::Could not look up $BOT_LOGIN; using its noreply address."
+                BOT_EMAIL="${BOT_LOGIN}@users.noreply.github.com"
+              fi
+              git config user.name "$BOT_LOGIN"
+              git config user.email "$BOT_EMAIL"
+            else
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+            fi
+            git tag -a "$TAG" -m "Release $TAG" "$TARGET_SHA"
+            AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+            echo "::add-mask::${AUTH_HEADER#AUTHORIZATION: basic }"
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+            export GIT_CONFIG_VALUE_0="$AUTH_HEADER"
+            if git push origin "refs/tags/$TAG"; then
+              CREATED=true
+            else
+              EXISTING_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
+              if [[ "$EXISTING_SHA" != "$TARGET_SHA" ]]; then
+                echo "::error::Tag race: $TAG points to $EXISTING_SHA, expected $TARGET_SHA."
+                exit 1
+              fi
+            fi
+          fi
+          REMOTE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
+          if [[ "$REMOTE_SHA" != "$TARGET_SHA" ]]; then
+            echo "::error::$TAG resolves to $REMOTE_SHA, expected $TARGET_SHA."
+            exit 1
+          fi
+          echo "created=$CREATED" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists; leaving its notes intact."
+          else
+            if ! gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Release $TAG" --notes-file "$RUNNER_TEMP/release_notes.md"; then
+              gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+              echo "GitHub Release $TAG was created concurrently; leaving its notes intact."
+            fi
+          fi
+
+      # A GITHUB_TOKEN-created tag does not trigger push workflows. A correct
+      # existing tag may already have push or dispatch runs; neither is repeated.
+      - name: Dispatch missing tag workflows (GITHUB_TOKEN fallback)
+        if: steps.app_token.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check.outputs.next_version }}
+          TARGET_SHA: ${{ needs.check.outputs.target_sha }}
+          TAG_CREATED: ${{ steps.create_tag.outputs.created }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::${AUTH_HEADER#AUTHORIZATION: basic }"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          export GIT_CONFIG_VALUE_0="$AUTH_HEADER"
+          if git ls-remote --exit-code origin "refs/heads/$TAG" >/dev/null; then
+            echo "::error::A branch named $TAG makes a tag workflow dispatch ambiguous."
+            exit 1
+          else
+            RC="$?"
+            if [[ "$RC" -ne 2 ]]; then exit "$RC"; fi
+          fi
+          for WORKFLOW in release.yml docker.yml; do
+            MATCHES=0
+            for ATTEMPT in 1 2 3; do
+              REMOTE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
+              if [[ "$REMOTE_SHA" != "$TARGET_SHA" ]]; then
+                echo "::error::$TAG moved to $REMOTE_SHA before $WORKFLOW dispatch."
+                exit 1
+              fi
+              MATCHES=0
+              for EVENT in push workflow_dispatch; do
+                RUNS="$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW/runs" \
+                  -f event="$EVENT" -f head_sha="$TARGET_SHA" -f per_page=100)"
+                TOTAL="$(jq -r '.total_count' <<< "$RUNS")"
+                if [[ "$TOTAL" -gt 100 ]]; then
+                  echo "::error::More than 100 $WORKFLOW $EVENT runs on $TARGET_SHA; inspect manually before retrying."
+                  exit 1
+                fi
+                EVENT_MATCHES="$(jq -r --arg tag "$TAG" --arg sha "$TARGET_SHA" --arg event "$EVENT" \
+                  '[.workflow_runs[] | select(.head_branch == $tag and .head_sha == $sha and .event == $event)] | length' <<< "$RUNS")"
+                MATCHES=$((MATCHES + EVENT_MATCHES))
+              done
+              if [[ "$MATCHES" -gt 0 || "$TAG_CREATED" == true || "$ATTEMPT" -eq 3 ]]; then break; fi
+              sleep 5
+            done
+            if [[ "$MATCHES" -gt 0 ]]; then
+              echo "$WORKFLOW already has $MATCHES push/dispatch run(s) for $TAG at $TARGET_SHA."
+            elif [[ "$TAG_CREATED" != true ]]; then
+              echo "::error::Existing $TAG has no visible $WORKFLOW push/dispatch run at $TARGET_SHA. Inspect the run list and dispatch manually if truly absent."
+              exit 1
+            elif [[ "$WORKFLOW" == release.yml ]]; then
+              gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" -f version="$VERSION"
+            else
+              gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+            fi
+          done
+
+      - name: Report App-triggered tag workflows
+        if: steps.create_tag.outputs.created == 'true' && steps.app_token.outcome == 'success'
         env:
           APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
           VERSION: ${{ needs.check.outputs.next_version }}
         run: |
-          MESSAGE="Not dispatching release.yml or docker.yml: ${APP_SLUG}[bot] pushed v${VERSION}, and that tag push starts both through their on: push: tags triggers."
-          echo "::notice title=Release workflows start from the tag push::${MESSAGE}"
-          echo "${MESSAGE}" >> "$GITHUB_STEP_SUMMARY"
+          MESSAGE="${APP_SLUG}[bot] created v${VERSION}; its tag push starts release.yml and docker.yml."
+          echo "::notice title=Tag workflows::$MESSAGE"
+          echo "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
