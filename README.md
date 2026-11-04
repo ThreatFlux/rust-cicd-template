@@ -45,10 +45,10 @@ cd my-project
 # Replace template placeholders and verify.
 make template-check
 
-# Install local tooling and run full CI locally.
+# Install local tooling and run the normal local checks.
 make dev-setup
-make hooks-install
-make ci-local
+make fmt-check
+make lint
 ```
 
 After generating, replace `README.md` with `README_TEMPLATE.md`, then delete `README_TEMPLATE.md`. The `make template-check` target will fail until this handoff is complete.
@@ -83,7 +83,7 @@ cp -r .github docs scripts .cargo \
 
 - Multi-platform release binaries (Linux x86_64/aarch64, macOS universal, Windows x86_64)
 - Docker build with Trivy scan, Cosign signing, and OCI image labels
-- Automated release tagging driven by [Conventional Commits](https://www.conventionalcommits.org/)
+- Reviewed release PRs driven by [Conventional Commits](https://www.conventionalcommits.org/), then exact-commit tagging
 - crates.io publishing support
 
 ### Project Governance
@@ -139,18 +139,18 @@ flowchart LR
 
     subgraph Auto["auto-release.yml"]
         Conv[Conventional Commits]
-        Bump[Version bump]
-        NewTag[Create tag]
+        Bump[Version bump PR]
+        NewTag[Tag accepted main commit]
     end
+    Review[Independent review and merge]
 
     Push --> CI & Sec & Docker
     Cron --> CI & Sec & Docker
     CI -- pass --> Auto
     Sec -- pass --> Auto
-    Auto --> NewTag
     Tag --> Rel
     NewTag -.-> Tag
-    Conv --> Bump --> NewTag
+    Conv --> Bump --> Review --> NewTag
 ```
 
 <p align="right"><a href="#table-of-contents">back to top</a></p>
@@ -186,7 +186,7 @@ See [docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md](docs/TEMPLATE_BOOTSTRAP_CHECKLIST.md)
 | [`ci.yml`](.github/workflows/ci.yml) | Format, lint, test, docs, coverage, MSRV, feature checks | Push, PR, weekly |
 | [`security.yml`](.github/workflows/security.yml) | Audit, deny, SBOM, secret scanning, Scorecard | Push, PR, weekly |
 | [`release.yml`](.github/workflows/release.yml) | Build, package, publish, and attach release assets | Tags, manual |
-| [`auto-release.yml`](.github/workflows/auto-release.yml) | Conventional-commit-driven release tagging | CI + Security pass |
+| [`auto-release.yml`](.github/workflows/auto-release.yml) | Propose a release PR, then tag its accepted main commit after exact push checks | CI + Security pass |
 | [`docker.yml`](.github/workflows/docker.yml) | Build, scan, sign, and SBOM container images | Push, PR, weekly |
 
 <p align="right"><a href="#table-of-contents">back to top</a></p>
@@ -207,7 +207,8 @@ Then validate:
 
 ```bash
 make template-check   # Fails if placeholders remain
-make ci               # Full local CI pass
+make fmt-check
+make lint             # Hosted CI runs the broader suites
 ```
 
 <p align="right"><a href="#table-of-contents">back to top</a></p>
@@ -311,15 +312,19 @@ Defaults to GitHub-hosted runners. Set these only for custom runner labels:
 
 | Secret | Purpose |
 |--------|---------|
-| `GITHUB_TOKEN` | Release assets, package publishing, container publishing |
-| `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` (optional) | Private key of a GitHub App that cuts auto-releases; set it together with the `RUST_TEMPLATE_RELEASE_APP_ID` variable |
+| `GITHUB_TOKEN` | Release branch/PR and tag fallback, GitHub Release assets, workflow dispatch, and GHCR publishing |
+| `RUST_TEMPLATE_RELEASE_APP_PRIVATE_KEY` (optional) | Private key of a GitHub App that opens release PRs and tags accepted commits; set it together with the `RUST_TEMPLATE_RELEASE_APP_ID` variable |
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` (optional) | Docker Hub push and signing; read only when `RUST_TEMPLATE_PUBLISH_DOCKERHUB` is `true` |
 
-Auto Release falls back to `GITHUB_TOKEN` when no release App is configured, and then
-dispatches `release.yml` and `docker.yml` for each new tag. With an App (the repository
+Auto Release falls back to `GITHUB_TOKEN` when no release App is configured. Its PR
+`opened` or `synchronize` event creates approval-required CI and Security runs; a
+maintainer with write access must approve those workflow runs separately from reviewing
+the PR. Its branch push creates no push runs, and Auto Release dispatches
+`release.yml` and `docker.yml` for a tag it just creates. With an App (the repository
 pair above or, when neither of those is set, the ThreatFlux organization's
 `TF_AUTOMATION_APP_ID` and `TF_AUTOMATION_APP_PRIVATE_KEY`), the App's tag push starts
-them directly. A pair with only one value set fails the run. See
+them directly. Both paths require the release PR to merge under review rules; neither
+pushes a release commit directly to `main`. A pair with only one value set fails the run. See
 [docs/RELEASING.md](docs/RELEASING.md#release-token).
 
 crates.io publishing needs no secret: `release.yml` publishes through

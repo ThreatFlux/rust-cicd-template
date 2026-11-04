@@ -14,11 +14,14 @@ except ModuleNotFoundError:  # pragma: no cover
 
 ROOT_MANIFEST = Path("Cargo.toml")
 SKIP_DIRS = {".git", "target"}
+RELEASE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERIFIABLE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$")
 DEPENDENCY_SECTION_PREFIXES = (
     "dependencies",
     "dev-dependencies",
     "build-dependencies",
 )
+PACKAGE_TABLES = {("package",), ("workspace", "package")}
 
 
 def load_toml(path: Path) -> dict:
@@ -47,10 +50,37 @@ def package_names(manifests: list[Path]) -> set[str]:
     return names
 
 
+def dependency_groups(manifest: dict) -> list[tuple[tuple[str, ...], dict]]:
+    groups: list[tuple[tuple[str, ...], dict]] = []
+    for scope_path, scope in (((), manifest), (("workspace",), manifest.get("workspace", {}))):
+        for kind in DEPENDENCY_SECTION_PREFIXES:
+            dependencies = scope.get(kind, {})
+            if isinstance(dependencies, dict):
+                groups.append((scope_path + (kind,), dependencies))
+    for target_name, target in manifest.get("target", {}).items():
+        for kind in DEPENDENCY_SECTION_PREFIXES:
+            dependencies = target.get(kind, {})
+            if isinstance(dependencies, dict):
+                groups.append((("target", target_name, kind), dependencies))
+    return groups
+
+
+def internal_dependency_aliases(manifest: dict, internal_names: set[str]) -> dict[tuple[str, ...], set[str]]:
+    aliases: dict[tuple[str, ...], set[str]] = {}
+    for section, dependencies in dependency_groups(manifest):
+        for alias, spec in dependencies.items():
+            if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+                continue
+            name = spec.get("package", alias)
+            if name in internal_names and isinstance(spec.get("version"), str):
+                aliases.setdefault(section, set()).add(alias)
+    return aliases
+
+
 def current_version(root_manifest: Path) -> str:
     root = load_toml(root_manifest)
     package = root.get("package", {})
-    if isinstance(package, dict) and "version" in package:
+    if isinstance(package, dict) and isinstance(package.get("version"), str):
         return package["version"]
     workspace_pkg = root.get("workspace", {}).get("package", {})
     if isinstance(workspace_pkg, dict) and "version" in workspace_pkg:
@@ -58,75 +88,189 @@ def current_version(root_manifest: Path) -> str:
     raise SystemExit("unable to determine current version from Cargo.toml")
 
 
-def replace_scoped_version(content: str, header: str, new_version: str) -> tuple[str, int]:
+TOML_KEY = r"""(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|'[^']*')"""
+ASSIGNMENT = re.compile(rf"^[ \t]*(?P<key>{TOML_KEY}(?:[ \t]*\.[ \t]*{TOML_KEY})*)[ \t]*=[ \t]*")
+STRING_VALUE = re.compile(r"""(?P<quote>["'])(?P<value>[^"'\r\n]*)(?P=quote)""")
+INLINE_VERSION = re.compile(
+    r"""(?:\{|,)[ \t]*(?:version|"version"|'version')[ \t]*=[ \t]*(?P<quote>["'])(?P<value>[^"'\r\n]*)(?P=quote)"""
+)
+
+
+def toml_key_path(raw_key: str) -> tuple[str, ...]:
+    node = tomllib.loads(f"{raw_key} = 0")
+    path: list[str] = []
+    while isinstance(node, dict):
+        key, node = next(iter(node.items()))
+        path.append(key)
+    return tuple(path)
+
+
+def toml_section_path(line: str) -> tuple[str, ...] | None:
+    header = line.strip()
+    if not header.startswith("["):
+        return None
+    marker = "__release_version_section_marker__"
+    try:
+        node = tomllib.loads(f"{header}\n{marker} = true")
+    except tomllib.TOMLDecodeError:
+        return None
+
+    def find_marker(value: object, path: tuple[str, ...]) -> tuple[str, ...] | None:
+        if isinstance(value, dict):
+            if marker in value:
+                return path
+            for key, child in value.items():
+                found = find_marker(child, path + (key,))
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for child in value:
+                found = find_marker(child, path)
+                if found is not None:
+                    return found
+        return None
+
+    return find_marker(node, ())
+
+
+def replace_string_value(line: str, start: int, new_version: str) -> str:
+    match = STRING_VALUE.match(line, start)
+    if match is None:
+        return line
+    return line[: match.start("value")] + new_version + line[match.end("value") :]
+
+
+def replace_inline_version(line: str, start: int, new_version: str) -> str:
+    end = line.find("}", start)
+    match = INLINE_VERSION.search(line, start, end) if end >= 0 else None
+    if match is None:
+        return line
+    return line[: match.start("value")] + new_version + line[match.end("value") :]
+
+
+def replace_dependency_assignment(
+    line: str, key: tuple[str, ...], start: int, aliases: set[str], new_version: str
+) -> str:
+    if len(key) == 1 and key[0] in aliases:
+        if line[start:].startswith("{"):
+            return replace_inline_version(line, start, new_version)
+        return replace_string_value(line, start, new_version)
+    if len(key) == 2 and key[0] in aliases and key[1] == "version":
+        return replace_string_value(line, start, new_version)
+    return line
+
+
+def replace_manifest_assignment(
+    line: str,
+    section: tuple[str, ...],
+    new_version: str,
+    aliases: dict[tuple[str, ...], set[str]],
+    dependency_tables: set[tuple[str, ...]],
+) -> str:
+    assignment = ASSIGNMENT.match(line)
+    if assignment is None:
+        return line
+    key = toml_key_path(assignment["key"])
+    start = assignment.end()
+    if section in PACKAGE_TABLES or section in dependency_tables:
+        return replace_string_value(line, start, new_version) if key == ("version",) else line
+    if section in aliases:
+        return replace_dependency_assignment(line, key, start, aliases[section], new_version)
+    return line
+
+
+def replace_manifest_versions(content: str, new_version: str, internal_names: set[str]) -> str:
+    aliases = internal_dependency_aliases(tomllib.loads(content), internal_names)
+    dependency_tables = {section + (alias,) for section, names in aliases.items() for alias in names}
     lines = content.splitlines(keepends=True)
-    in_section = False
-    replacements = 0
+    section: tuple[str, ...] = ()
     for idx, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            in_section = stripped == f"[{header}]"
-            continue
-        if in_section and re.match(r'^version\s*=\s*"[^"]+"', stripped):
-            prefix = line[: len(line) - len(line.lstrip())]
-            suffix = "\n" if line.endswith("\n") else ""
-            lines[idx] = f'{prefix}version = "{new_version}"{suffix}'
-            replacements += 1
-            in_section = False
-    return "".join(lines), replacements
-
-
-def replace_inline_dependency_versions(content: str, internal_names: set[str], new_version: str) -> tuple[str, int]:
-    replacements = 0
-    for name in sorted(internal_names):
-        pattern = re.compile(
-            rf'(?m)^(\s*{re.escape(name)}\s*=\s*\{{[^#\n]*?\bversion\s*=\s*")([^"]+)(")',
-        )
-        content, count = pattern.subn(rf"\g<1>{new_version}\g<3>", content)
-        replacements += count
-    return content, replacements
-
-
-def replace_table_dependency_versions(content: str, internal_names: set[str], new_version: str) -> tuple[str, int]:
-    lines = content.splitlines(keepends=True)
-    section: str | None = None
-    replacements = 0
-    for idx, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            section = stripped[1:-1]
-            continue
-        if section is None or "." not in section:
-            continue
-        prefix, name = section.rsplit(".", 1)
-        if prefix not in DEPENDENCY_SECTION_PREFIXES and not any(
-            prefix.endswith(f".{dep_prefix}") for dep_prefix in DEPENDENCY_SECTION_PREFIXES
-        ):
-            continue
-        if name not in internal_names:
-            continue
-        if re.match(r'^version\s*=\s*"[^"]+"', stripped):
-            indent = line[: len(line) - len(line.lstrip())]
-            suffix = "\n" if line.endswith("\n") else ""
-            lines[idx] = f'{indent}version = "{new_version}"{suffix}'
-            replacements += 1
-    return "".join(lines), replacements
+        header = toml_section_path(line)
+        if header is not None:
+            section = header
+        else:
+            lines[idx] = replace_manifest_assignment(line, section, new_version, aliases, dependency_tables)
+    return "".join(lines)
 
 
 def update_manifest(path: Path, new_version: str, internal_names: set[str]) -> bool:
     original = path.read_text(encoding="utf-8")
-    content = original
-    content, _ = replace_scoped_version(content, "package", new_version)
-    content, _ = replace_scoped_version(content, "workspace.package", new_version)
-    content, _ = replace_inline_dependency_versions(content, internal_names, new_version)
-    content, _ = replace_table_dependency_versions(content, internal_names, new_version)
+    content = replace_manifest_versions(original, new_version, internal_names)
     if content != original:
         path.write_text(content, encoding="utf-8")
         return True
     return False
 
 
+def lock_reference_versions(
+    packages: list[list[dict]], new_version: str, internal_names: set[str]
+) -> tuple[dict[str, str], set[str]]:
+    local_refs = {
+        f"{package['name']} {package['version']}": f"{package['name']} {new_version}"
+        for group in packages
+        for package in group
+        if package.get("name") in internal_names and "source" not in package
+    }
+    registry_refs = {
+        f"{package['name']} {package['version']}"
+        for group in packages
+        for package in group
+        if "source" in package
+    }
+    return local_refs, registry_refs
+
+
+def replace_lock_package_version(path: Path, block: str, package: dict, new_version: str) -> str:
+    block, count = re.subn(
+        r'(?m)^([ \t]*version[ \t]*=[ \t]*)(["\'])([^"\'\r\n]+)\2',
+        lambda match: f"{match[1]}{match[2]}{new_version}{match[2]}",
+        block,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"{path} has no version for {package['name']}")
+    return block
+
+
+def replace_lock_dependency_refs(
+    path: Path, block: str, package: dict, local_refs: dict[str, str], registry_refs: set[str]
+) -> str:
+    for dependency in package.get("dependencies", []):
+        if dependency not in local_refs:
+            continue
+        if dependency in registry_refs:
+            raise SystemExit(f"{path} has ambiguous local/registry dependency {dependency}")
+        old_ref = f'"{dependency}"'
+        if block.count(old_ref) != 1:
+            raise SystemExit(f"{path} cannot locate dependency reference {dependency}")
+        block = block.replace(old_ref, f'"{local_refs[dependency]}"')
+    return block
+
+
+def update_lockfile(path: Path, new_version: str, internal_names: set[str]) -> bool:
+    if not path.is_file():
+        return False
+    original = path.read_text(encoding="utf-8")
+    blocks = re.split(r"(?m)(?=^[ \t]*\[\[[ \t]*package[ \t]*\]\][ \t]*(?:#.*)?$)", original)
+    packages = [tomllib.loads(block).get("package", []) for block in blocks]
+    local_refs, registry_refs = lock_reference_versions(packages, new_version, internal_names)
+    for idx, block in enumerate(blocks):
+        if not packages[idx]:
+            continue
+        package = packages[idx][0]
+        if package.get("name") in internal_names and "source" not in package:
+            block = replace_lock_package_version(path, block, package, new_version)
+        blocks[idx] = replace_lock_dependency_refs(path, block, package, local_refs, registry_refs)
+    updated = "".join(blocks)
+    if updated != original:
+        path.write_text(updated, encoding="utf-8")
+        return True
+    return False
+
+
 def set_version(root_manifest: Path, new_version: str) -> int:
+    if not RELEASE_VERSION.fullmatch(new_version):
+        raise SystemExit("release version must be MAJOR.MINOR.PATCH")
     manifests = workspace_member_manifests(root_manifest)
     internal_names = package_names(manifests)
     changed = False
@@ -134,14 +278,68 @@ def set_version(root_manifest: Path, new_version: str) -> int:
         if any(part in SKIP_DIRS for part in manifest.parts):
             continue
         changed = update_manifest(manifest, new_version, internal_names) or changed
+    changed = update_lockfile(root_manifest.parent / "Cargo.lock", new_version, internal_names) or changed
+    # cargo check --workspace does not refresh the separate fuzz workspace lockfile.
+    changed = update_lockfile(root_manifest.parent / "fuzz" / "Cargo.lock", new_version, internal_names) or changed
     if not changed:
-        raise SystemExit("no Cargo.toml files were updated")
+        raise SystemExit("no Cargo.toml or Cargo.lock files were updated")
+    return 0
+
+
+def verify_package_versions(manifest: Path, data: dict, expected: str) -> None:
+    for package in (data.get("package", {}), data.get("workspace", {}).get("package", {})):
+        version = package.get("version")
+        if isinstance(version, str) and version != expected:
+            raise SystemExit(f"{manifest} has package version {version}, expected {expected}")
+
+
+def verify_dependency_versions(manifest: Path, data: dict, expected: str, internal_names: set[str]) -> None:
+    for _, dependencies in dependency_groups(data):
+        for alias, spec in dependencies.items():
+            name = spec.get("package", alias) if isinstance(spec, dict) else alias
+            if name not in internal_names:
+                continue
+            version = spec.get("version") if isinstance(spec, dict) else spec
+            if version is not None and version != expected:
+                raise SystemExit(
+                    f"{manifest} has internal dependency {alias} at {version}, expected {expected}"
+                )
+
+
+def verify_lockfile_versions(lockfile: Path, expected: str, internal_names: set[str]) -> None:
+    if not lockfile.is_file():
+        return
+    for package in load_toml(lockfile).get("package", []):
+        if (
+            package.get("name") in internal_names
+            and "source" not in package
+            and package.get("version") != expected
+        ):
+            raise SystemExit(f"{lockfile} has {package['name']} at {package.get('version')}, expected {expected}")
+
+
+def verify_version(root_manifest: Path, expected: str) -> int:
+    """Check the reviewed tree without changing it before making a release tag."""
+    if not VERIFIABLE_VERSION.fullmatch(expected):
+        raise SystemExit("release version must be MAJOR.MINOR.PATCH with an optional pre-release suffix")
+    if current_version(root_manifest) != expected:
+        raise SystemExit(f"Cargo.toml does not declare release version {expected}")
+
+    manifests = workspace_member_manifests(root_manifest)
+    internal_names = package_names(manifests)
+    for manifest in manifests:
+        data = load_toml(manifest)
+        verify_package_versions(manifest, data, expected)
+        verify_dependency_versions(manifest, data, expected, internal_names)
+
+    for lockfile in (root_manifest.parent / "Cargo.lock", root_manifest.parent / "fuzz" / "Cargo.lock"):
+        verify_lockfile_versions(lockfile, expected, internal_names)
     return 0
 
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        raise SystemExit("usage: release_version.py <current|set> [version]")
+        raise SystemExit("usage: release_version.py <current|set|verify> [version]")
     command = argv[1]
     if command == "current":
         print(current_version(ROOT_MANIFEST))
@@ -150,6 +348,10 @@ def main(argv: list[str]) -> int:
         if len(argv) != 3:
             raise SystemExit("usage: release_version.py set <version>")
         return set_version(ROOT_MANIFEST, argv[2])
+    if command == "verify":
+        if len(argv) != 3:
+            raise SystemExit("usage: release_version.py verify <version>")
+        return verify_version(ROOT_MANIFEST, argv[2])
     raise SystemExit(f"unknown command: {command}")
 
 
