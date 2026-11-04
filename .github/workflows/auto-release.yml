@@ -321,6 +321,7 @@ jobs:
               if [[ -f Cargo.lock ]]; then
                 echo "- would update Cargo.lock if cargo check changes it"
               fi
+              echo "- would refresh fuzz/Cargo.lock for the new root package version"
               # The notes Create Release would give the GitHub Release, from the
               # same script and commit. The script logs their source on stderr.
               python3 scripts/release_notes.py "${NEXT_VERSION}" --output "${RUNNER_TEMP}/release_notes.md"
@@ -374,6 +375,8 @@ jobs:
           VERSION="${{ needs.check.outputs.next_version }}"
           python3 scripts/release_version.py set "$VERSION"
           cargo check --workspace --all-features
+          # The fuzz package has its own lockfile with the root path dependency.
+          cargo update --manifest-path fuzz/Cargo.toml -p rust-cicd-template
         env:
           VERSION: ${{ needs.check.outputs.next_version }}
 
@@ -452,6 +455,7 @@ jobs:
           if [[ -f Cargo.lock ]]; then
             git add Cargo.lock
           fi
+          git add fuzz/Cargo.lock
           git commit -m "chore: release v$VERSION"
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin HEAD:main
