@@ -104,14 +104,46 @@ def require_main_ancestry(source: str, head: str, comparison: str) -> None:
         raise ValueError("container source is outside accepted main history")
 
 
+def selected_version(
+    root_manifest: Path, package_name: str, sbom_manifest: Path
+) -> str:
+    """Read the package actually selected by Docker's Cargo build arguments."""
+    from release_version import load_toml, workspace_member_manifests
+
+    root = load_toml(root_manifest)
+    if package_name:
+        matches = [
+            manifest
+            for manifest in workspace_member_manifests(root_manifest)
+            if load_toml(manifest).get("package", {}).get("name") == package_name
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "configured binary package must select one workspace member"
+            )
+        manifest = matches[0]
+    else:
+        manifest = root_manifest if root.get("package") else sbom_manifest
+    version = load_toml(manifest).get("package", {}).get("version")
+    if isinstance(version, dict) and version.get("workspace") is True:
+        version = root.get("workspace", {}).get("package", {}).get("version")
+    if not isinstance(version, str):
+        raise ValueError("unable to determine the configured binary package version")
+    return version
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validate", action="store_true")
     args = parser.parse_args()
     ref = os.environ["GITHUB_REF"]
-    from release_version import current_version
-
-    validate_release(ref, current_version(Path("Cargo.toml")))
+    if ref.startswith("refs/tags/"):
+        version = selected_version(
+            Path("Cargo.toml"),
+            os.environ.get("BINARY_PACKAGE", ""),
+            Path(os.environ.get("SBOM_MANIFEST_PATH", "Cargo.toml")),
+        )
+        validate_release(ref, version)
     if args.validate and not ref.startswith("refs/tags/"):
         return
     repository = os.environ["GITHUB_REPOSITORY"]

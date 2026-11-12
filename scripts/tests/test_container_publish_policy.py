@@ -4,10 +4,13 @@ import importlib.util
 import json
 import pathlib
 import secrets
+import sys
+import tempfile
 import unittest
 from unittest import mock
 
 PATH = pathlib.Path(__file__).parents[1] / "container_publish_policy.py"
+sys.path.insert(0, str(PATH.parent))
 SPEC = importlib.util.spec_from_file_location("container_publish_policy", PATH)
 POLICY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(POLICY)
@@ -133,6 +136,50 @@ class ContainerPublicationPolicy(unittest.TestCase):
             POLICY.api("repos/ThreatFlux/example/commits/main")
         response.read.assert_not_called()
         connect.return_value.close.assert_called_once()
+
+    def test_virtual_workspace_uses_selected_binary_member_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            manifest = root / "Cargo.toml"
+            manifest.write_text('[workspace]\nmembers = ["app", "library"]\n')
+            for name, version in (("app", "1.2.3"), ("library", "9.0.0")):
+                member = root / name
+                member.mkdir()
+                (member / "Cargo.toml").write_text(
+                    f'[package]\nname = "{name}"\nversion = "{version}"\n'
+                )
+            version = POLICY.selected_version(
+                manifest, "app", root / "library/Cargo.toml"
+            )
+            self.assertEqual(version, "1.2.3")
+            POLICY.validate_release("refs/tags/v1.2.3", version)
+            with self.assertRaises(ValueError):
+                POLICY.validate_release("refs/tags/v9.0.0", version)
+            with self.assertRaises(ValueError):
+                POLICY.selected_version(manifest, "missing", manifest)
+
+    def test_selected_member_can_inherit_workspace_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            manifest = root / "Cargo.toml"
+            manifest.write_text(
+                '[workspace]\nmembers = ["app"]\n[workspace.package]\nversion = "1.2.3"\n'
+            )
+            member = root / "app"
+            member.mkdir()
+            (member / "Cargo.toml").write_text(
+                '[package]\nname = "app"\nversion.workspace = true\n'
+            )
+            self.assertEqual(
+                POLICY.selected_version(manifest, "app", manifest), "1.2.3"
+            )
+
+    @mock.patch.dict(POLICY.os.environ, {"GITHUB_REF": "refs/heads/main"})
+    @mock.patch.object(POLICY, "selected_version")
+    @mock.patch.object(sys, "argv", ["container_publish_policy.py", "--validate"])
+    def test_non_tag_build_does_not_require_a_root_package_version(self, version):
+        POLICY.main()
+        version.assert_not_called()
 
 
 if __name__ == "__main__":

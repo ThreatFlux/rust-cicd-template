@@ -319,8 +319,18 @@ base tags remain available for historical builds.
 
 Tag builds must match the compiled Cargo version and belong to accepted main history.
 This policy applies to workflow versions containing these guards; historical tags
-retain their original workflow snapshots. Use the current main workflow when
-performing a manual publication recovery.
+retain their original workflow snapshots.
+
+To recover publication of the current main source, dispatch `docker.yml` with
+`--ref main`. This builds current main and cannot select a historical source.
+
+For a historical release, first locate its existing full-version image digest
+and verify its source revision, version, signature, and SBOM before deploying
+that immutable digest. If its image is missing, prepare a separately reviewed
+recovery workflow that uses the current publication guards while checking out
+the exact historical source. Do not rerun an older workflow snapshot that can
+overwrite floating aliases. The current `docker.yml` has no historical-source
+input and does not provide that rebuild procedure.
 
 ### Required Permissions
 
