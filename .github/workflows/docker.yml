@@ -60,6 +60,8 @@ jobs:
       security-events: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      base_digest: ${{ steps.base_build.outputs.digest }}
+      rust_version: ${{ steps.rust_toolchain.outputs.version }}
       image_name: ${{ steps.lowercase.outputs.image_name }}
       # 'true' only when this run pushed to Docker Hub; the sign job then signs
       # the Docker Hub copy too. A flag rather than the image reference, since
@@ -153,6 +155,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+
+      - name: Validate the tag against the compiled package version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/container_publish_policy.py --validate
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -175,25 +185,23 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.image_targets.outputs.images }}
+          flavor: latest=false
           tags: |
-            type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Extract base image metadata
         id: base_meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.image_targets.outputs.images }}
+          flavor: latest=false
           tags: |
-            type=raw,value=base-rust-${{ steps.rust_toolchain.outputs.version }}
-            type=raw,value=base-rust-latest,enable={{is_default_branch}}
+            type=raw,value=base-${{ github.sha }}
 
       - name: Build base image
+        id: base_build
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -309,12 +317,13 @@ jobs:
 
       - name: Pull image
         if: github.event_name != 'pull_request'
-        run: docker pull ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
+        run: docker pull ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}@${{ needs.build.outputs.digest }}
 
       - name: Run Trivy scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', needs.build.outputs.image_name) || format('{0}/{1}:{2}', env.REGISTRY, needs.build.outputs.image_name, steps.sha.outputs.short) }}
+          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', needs.build.outputs.image_name) || format('{0}/{1}@{2}', env.REGISTRY, needs.build.outputs.image_name, needs.build.outputs.digest) }}
+          version: v0.76.2
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
@@ -403,8 +412,86 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
+          image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}@${{ needs.build.outputs.digest }}
+          syft-version: v1.57.1
           artifact-name: sbom.spdx.json
           format: spdx-json
           # Release assets need contents: write; release.yml attaches the release SBOMs.
           upload-release-assets: false
+
+  promote:
+    name: Promote verified container aliases
+    needs: [build, scan, sign, sbom]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    concurrency:
+      group: container-alias-promotion
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout the already built and scanned source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+
+      - name: Log in to registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: needs.build.outputs.dockerhub_enabled == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Re-evaluate refs and promote only the verified digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_NAME: ${{ needs.build.outputs.image_name }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          BASE_DIGEST: ${{ needs.build.outputs.base_digest }}
+          RUST_VERSION: ${{ needs.build.outputs.rust_version }}
+          DOCKERHUB_ENABLED: ${{ needs.build.outputs.dockerhub_enabled }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$BASE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$RUST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          # The concurrency lock covers this fresh decision and all promotions.
+          # A historical retry cannot finish after a newer promotion and rewind it.
+          python3 scripts/container_publish_policy.py > "$RUNNER_TEMP/alias-policy.json"
+          mapfile -t runtime_aliases < <(jq -r '.runtime[]' "$RUNNER_TEMP/alias-policy.json")
+          base_aliases=()
+          if [[ "$(jq -r .base "$RUNNER_TEMP/alias-policy.json")" == true ]]; then
+            base_aliases=("base-rust-$RUST_VERSION" base-rust-latest)
+          fi
+          images=("$REGISTRY/$IMAGE_NAME")
+          if [[ "$DOCKERHUB_ENABLED" == true ]]; then
+            images+=("$DOCKERHUB_REGISTRY/$DOCKERHUB_NAMESPACE/${IMAGE_NAME##*/}")
+          fi
+          for image in "${images[@]}"; do
+            for alias in "${runtime_aliases[@]}"; do
+              docker buildx imagetools create --tag "$image:$alias" "$image@$DIGEST"
+              actual="$(docker buildx imagetools inspect "$image:$alias" --format '{{.Manifest.Digest}}')"
+              [[ "$actual" == "$DIGEST" ]]
+            done
+            for alias in "${base_aliases[@]}"; do
+              docker buildx imagetools create --tag "$image:$alias" "$image@$BASE_DIGEST"
+              actual="$(docker buildx imagetools inspect "$image:$alias" --format '{{.Manifest.Digest}}')"
+              [[ "$actual" == "$BASE_DIGEST" ]]
+            done
+          done
