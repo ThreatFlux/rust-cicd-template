@@ -11,7 +11,7 @@ name: Auto Release
 # runs only in a read-only job; a fresh runner publishes the verified commit.
 concurrency:
   group: auto-release-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '-dry-run' || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 on:
   workflow_run:
