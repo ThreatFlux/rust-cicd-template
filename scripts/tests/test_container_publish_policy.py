@@ -1,8 +1,10 @@
 """Publication replay regressions; executed by the existing hosted Quick Check."""
 
 import importlib.util
+import json
 import pathlib
 import unittest
+from unittest import mock
 
 PATH = pathlib.Path(__file__).parents[1] / "container_publish_policy.py"
 SPEC = importlib.util.spec_from_file_location("container_publish_policy", PATH)
@@ -87,6 +89,48 @@ class ContainerPublicationPolicy(unittest.TestCase):
                 POLICY.require_main_ancestry(OLD, NEW, comparison)
         POLICY.require_main_ancestry(OLD, NEW, "ahead")
         POLICY.require_main_ancestry(NEW, NEW, "identical")
+
+    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": "test-only-token"})
+    @mock.patch.object(POLICY.http.client, "HTTPSConnection")
+    def test_github_api_uses_fixed_https_authority_and_all_tag_pages(self, connect):
+        first_page = [tag(f"v0.1.{number}", OLD) for number in range(100)]
+        last_page = [tag("v0.1.100", NEW)]
+        responses = []
+        for page in (first_page, last_page):
+            response = mock.Mock(status=200)
+            response.read.return_value = json.dumps(page).encode()
+            responses.append(response)
+        connection = connect.return_value
+        connection.getresponse.side_effect = responses
+        result = POLICY.api("repos/ThreatFlux/example/tags?per_page=100", pages=True)
+        self.assertEqual(result, first_page + last_page)
+        self.assertEqual(
+            connect.call_args_list, [mock.call("api.github.com", timeout=60)] * 2
+        )
+        paths = [call.args[1] for call in connection.request.call_args_list]
+        self.assertEqual(
+            paths,
+            [
+                "/repos/ThreatFlux/example/tags?per_page=100&page=1",
+                "/repos/ThreatFlux/example/tags?per_page=100&page=2",
+            ],
+        )
+        for call in connection.request.call_args_list:
+            self.assertEqual(call.args[0], "GET")
+            self.assertEqual(
+                call.kwargs["headers"]["Authorization"], "Bearer test-only-token"
+            )
+        self.assertEqual(connection.close.call_count, 2)
+
+    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": "test-only-token"})
+    @mock.patch.object(POLICY.http.client, "HTTPSConnection")
+    def test_github_api_failure_refuses_alias_decision(self, connect):
+        response = mock.Mock(status=403)
+        connect.return_value.getresponse.return_value = response
+        with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+            POLICY.api("repos/ThreatFlux/example/commits/main")
+        response.read.assert_not_called()
+        connect.return_value.close.assert_called_once()
 
 
 if __name__ == "__main__":

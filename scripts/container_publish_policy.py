@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 
 STABLE = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -20,15 +20,32 @@ def validate_release(ref: str, version: str) -> None:
         raise ValueError("release tag does not match the checked-out Cargo version")
 
 
-def aliases(ref: str, source: str, main: str, tags: list[dict]) -> dict:
-    """Historical retries publish their immutable tags but never rewind aliases."""
-    if not SHA.fullmatch(source) or not SHA.fullmatch(main):
-        raise ValueError("expected full source and main commit SHAs")
+def stable_tags(tags: list[dict]) -> list[tuple]:
+    """Discard prereleases before choosing each numeric release line."""
     stable = []
     for tag in tags:
         match = STABLE.fullmatch(tag["name"])
         if match:
             stable.append((tuple(map(int, match.groups())), tag))
+    return stable
+
+
+def version_aliases(version: tuple, stable: list[tuple]) -> list[str]:
+    major_line = [number for number, _ in stable if number[0] == version[0]]
+    minor_line = [number for number, _ in stable if number[:2] == version[:2]]
+    result = []
+    if version == max(minor_line):
+        result.append(f"{version[0]}.{version[1]}")
+    if version == max(major_line):
+        result.append(str(version[0]))
+    return result
+
+
+def aliases(ref: str, source: str, main: str, tags: list[dict]) -> dict:
+    """Historical retries publish their immutable tags but never rewind aliases."""
+    if not SHA.fullmatch(source) or not SHA.fullmatch(main):
+        raise ValueError("expected full source and main commit SHAs")
+    stable = stable_tags(tags)
     candidate = (
         STABLE.fullmatch(ref.removeprefix("refs/tags/"))
         if ref.startswith("refs/tags/")
@@ -41,22 +58,42 @@ def aliases(ref: str, source: str, main: str, tags: list[dict]) -> dict:
     current_main = source == main and (ref == "refs/heads/main" or matched_tag)
     runtime = ["main", "latest"] if current_main else []
     if matched_tag:
-        version = tuple(map(int, candidate.groups()))
-        major_line = [number for number, _ in stable if number[0] == version[0]]
-        minor_line = [number for number, _ in stable if number[:2] == version[:2]]
-        if version == max(minor_line):
-            runtime.append(f"{version[0]}.{version[1]}")
-        if version == max(major_line):
-            runtime.append(str(version[0]))
+        runtime.extend(version_aliases(tuple(map(int, candidate.groups())), stable))
     return {"runtime": runtime, "base": bool(current_main)}
 
 
+def api_request(path: str):
+    """Use a fixed HTTPS authority; repository/ref data never forms a command."""
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+        "User-Agent": "ThreatFlux-container-publication",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    connection = http.client.HTTPSConnection("api.github.com", timeout=60)
+    try:
+        connection.request("GET", "/" + path, headers=headers)
+        response = connection.getresponse()
+        if response.status != 200:
+            raise RuntimeError(f"GitHub API returned HTTP {response.status}")
+        return json.load(response)
+    finally:
+        connection.close()
+
+
 def api(path: str, *, pages: bool = False):
-    command = ["gh", "api", path]
-    if pages:
-        command.extend(["--paginate", "--slurp"])
-    value = json.loads(subprocess.check_output(command, text=True))
-    return [item for page in value for item in page] if pages else value
+    if not pages:
+        return api_request(path)
+    result = []
+    separator = "&" if "?" in path else "?"
+    for page in range(1, 1001):
+        values = api_request(f"{path}{separator}page={page}")
+        if not isinstance(values, list):
+            raise ValueError("expected a paginated GitHub tag list")
+        result.extend(values)
+        if len(values) < 100:
+            return result
+    raise RuntimeError("GitHub tag pagination exceeded its safety bound")
 
 
 def require_main_ancestry(source: str, head: str, comparison: str) -> None:
