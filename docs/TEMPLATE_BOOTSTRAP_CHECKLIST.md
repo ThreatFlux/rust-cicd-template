@@ -146,7 +146,7 @@ make fmt-check
 make lint
 ```
 
-Development uses the pinned Rust 1.99.0 toolchain. The default package MSRV is
+Development uses the pinned Rust 1.100.0 toolchain. The default package MSRV is
 1.97.1; keep `Cargo.toml`, `Makefile` and the CI MSRV job aligned when changing it.
 The optional hooks still run broader local suites; GitHub runners perform the required
 tests, builds, coverage, generated-contract checks and security checks. Inspect their

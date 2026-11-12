@@ -20,9 +20,9 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_STABLE_VERSION: 1.99.1
+  RUST_STABLE_VERSION: 1.100.0
   RUST_MSRV_VERSION: 1.97.1
-  RUSTUP_TOOLCHAIN: 1.99.1
+  RUSTUP_TOOLCHAIN: 1.100.0
 
 jobs:
   quick-check:
@@ -88,7 +88,7 @@ jobs:
       matrix:
         include:
           # Preserve existing protected check contexts as explicit compatibility
-          # lanes while the primary stable compiler advances to 1.99.1.
+          # lanes while the primary stable compiler advances to 1.100.0.
           - os: linux
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
             rust: "1.99.0"
@@ -113,6 +113,15 @@ jobs:
           - os: windows
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_WINDOWS || 'windows-latest' }}
             rust: "1.99.1"
+          - os: linux
+            runner: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+            rust: "1.100.0"
+          - os: macos
+            runner: ${{ vars.RUST_TEMPLATE_RUNNER_MACOS || 'macos-latest' }}
+            rust: "1.100.0"
+          - os: windows
+            runner: ${{ vars.RUST_TEMPLATE_RUNNER_WINDOWS || 'windows-latest' }}
+            rust: "1.100.0"
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     continue-on-error: ${{ matrix.rust == 'nightly' }}

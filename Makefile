@@ -3,7 +3,7 @@
 
 CARGO ?= cargo
 RUST_MSRV ?= 1.97.1
-RUST_TOOLCHAIN ?= 1.99.1
+RUST_TOOLCHAIN ?= 1.100.0
 
 DOCKER_IMAGE ?= $(shell basename $(CURDIR))
 DOCKER_TAG ?= latest
