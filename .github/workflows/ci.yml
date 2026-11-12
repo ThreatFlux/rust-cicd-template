@@ -225,7 +225,7 @@ jobs:
       - name: Install cargo-hack
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: cargo-hack@0.6.45
+          tool: cargo-hack@0.6.46
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
