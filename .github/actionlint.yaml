@@ -1,0 +1,10 @@
+# GitHub accepts these workflow fields; stable actionlint 1.7.12 predates them.
+# Scope each compatibility exception to its exact diagnostic and owning file.
+paths:
+  .github/workflows/auto-release.yml:
+    ignore:
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
+      - '^unexpected key "cache-mode" for "workflow" section\. expected one of "concurrency", "defaults", "env", "jobs", "name", "on", "permissions", "run-name"$'
+  .github/workflows/docker.yml:
+    ignore:
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'

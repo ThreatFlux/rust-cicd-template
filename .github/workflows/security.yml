@@ -45,9 +45,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: cargo-audit@0.23.0
+        run: cargo install --locked --version 0.23.0 cargo-audit
 
       - name: Run security audit
         run: cargo audit
@@ -134,9 +132,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: cargo-cyclonedx@0.5.10
+        run: cargo install --locked --version 0.5.10 cargo-cyclonedx
 
       - name: Generate SBOM
         run: make sbom BINARY_NAME="${BINARY_NAME}" SBOM_MANIFEST_PATH="${SBOM_MANIFEST_PATH}"

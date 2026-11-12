@@ -306,6 +306,32 @@ cosign verify docker.io/<namespace>/<repo>:<tag> \
 
 To stop publishing there, delete the variable or set it to `false`.
 
+### Container tags
+
+Docker builds first publish the source SHA and, for a release tag, its full version.
+Scanning and SBOM generation use the exact build digest. A separate serialized job
+promotes floating aliases only after the scan, signing and SBOM jobs succeed.
+It reads main and all stable tags again while holding that publication lock.
+`main` and `latest` continue to track current main; major and minor aliases select
+the newest stable version in their respective release lines. An older retry cannot
+replace a newer alias. Base-image aliases follow current main; source-specific
+base tags remain available for historical builds.
+
+Tag builds must match the compiled Cargo version and belong to accepted main history.
+This policy applies to workflow versions containing these guards; historical tags
+retain their original workflow snapshots.
+
+To recover publication of the current main source, dispatch `docker.yml` with
+`--ref main`. This builds current main and cannot select a historical source.
+
+For a historical release, first locate its existing full-version image digest
+and verify its source revision, version, signature, and SBOM before deploying
+that immutable digest. If its image is missing, prepare a separately reviewed
+recovery workflow that uses the current publication guards while checking out
+the exact historical source. Do not rerun an older workflow snapshot that can
+overwrite floating aliases. The current `docker.yml` has no historical-source
+input and does not provide that rebuild procedure.
+
 ### Required Permissions
 
 | Secret or setting | Holder | Purpose |

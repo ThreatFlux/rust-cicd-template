@@ -1,0 +1,186 @@
+"""Publication replay regressions; executed by the existing hosted Quick Check."""
+
+import importlib.util
+import json
+import pathlib
+import secrets
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+PATH = pathlib.Path(__file__).parents[1] / "container_publish_policy.py"
+sys.path.insert(0, str(PATH.parent))
+SPEC = importlib.util.spec_from_file_location("container_publish_policy", PATH)
+POLICY = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(POLICY)
+OLD = "a" * 40
+NEW = "b" * 40
+FAKE_TOKEN = secrets.token_hex(16)
+
+
+def tag(name, sha):
+    return {"name": name, "commit": {"sha": sha}}
+
+
+class ContainerPublicationPolicy(unittest.TestCase):
+    def test_current_main_keeps_main_tracking_aliases(self):
+        self.assertEqual(
+            POLICY.aliases("refs/heads/main", NEW, NEW, []),
+            {"runtime": ["main", "latest"], "base": True},
+        )
+
+    def test_stale_main_retry_cannot_overwrite_newer_main(self):
+        self.assertEqual(
+            POLICY.aliases("refs/heads/main", OLD, NEW, []),
+            {"runtime": [], "base": False},
+        )
+
+    def test_historical_tag_cannot_roll_stable_aliases_back(self):
+        tags = [tag("v0.5.3", OLD), tag("v0.5.4", NEW)]
+        self.assertEqual(
+            POLICY.aliases("refs/tags/v0.5.3", OLD, NEW, tags),
+            {"runtime": [], "base": False},
+        )
+
+    def test_latest_tag_uses_numeric_order_and_ignores_prereleases(self):
+        tags = [tag("v0.5.9", OLD), tag("v0.5.10", NEW), tag("v1.0.0-rc.1", OLD)]
+        self.assertEqual(
+            POLICY.aliases("refs/tags/v0.5.10", NEW, NEW, tags),
+            {"runtime": ["main", "latest", "0.5", "0"], "base": True},
+        )
+
+    def test_stable_tag_never_rewinds_main_tracking_aliases(self):
+        self.assertEqual(
+            POLICY.aliases("refs/tags/v0.5.4", OLD, NEW, [tag("v0.5.4", OLD)]),
+            {"runtime": ["0.5", "0"], "base": False},
+        )
+
+    def test_moved_or_mismatched_tag_cannot_promote(self):
+        self.assertEqual(
+            POLICY.aliases("refs/tags/v0.5.4", OLD, NEW, [tag("v0.5.4", NEW)]),
+            {"runtime": [], "base": False},
+        )
+        self.assertEqual(
+            POLICY.aliases("refs/tags/v0.5.4", OLD, OLD, [tag("v0.5.4", NEW)]),
+            {"runtime": [], "base": False},
+        )
+
+    def test_maintenance_line_does_not_roll_newer_major_or_base_back(self):
+        tags = [tag("v0.4.9", OLD), tag("v0.5.4", NEW), tag("v1.0.0", NEW)]
+        self.assertEqual(
+            POLICY.aliases("refs/tags/v0.4.9", OLD, NEW, tags),
+            {"runtime": ["0.4"], "base": False},
+        )
+
+    def test_feature_branch_does_not_promote_even_at_main_sha(self):
+        self.assertEqual(
+            POLICY.aliases("refs/heads/feature", NEW, NEW, []),
+            {"runtime": [], "base": False},
+        )
+
+    def test_invalid_sha_fails_closed(self):
+        with self.assertRaises(ValueError):
+            POLICY.aliases("refs/heads/main", "bad", NEW, [])
+
+    def test_tag_must_match_compiled_package_version(self):
+        with self.assertRaises(ValueError):
+            POLICY.validate_release("refs/tags/v0.5.4", "0.5.3")
+        POLICY.validate_release("refs/tags/v0.5.4", "0.5.4")
+
+    def test_unmerged_tag_source_fails_closed(self):
+        for comparison in ("behind", "diverged"):
+            with self.assertRaises(ValueError):
+                POLICY.require_main_ancestry(OLD, NEW, comparison)
+        POLICY.require_main_ancestry(OLD, NEW, "ahead")
+        POLICY.require_main_ancestry(NEW, NEW, "identical")
+
+    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": FAKE_TOKEN})
+    @mock.patch.object(POLICY.http.client, "HTTPSConnection")
+    def test_github_api_uses_fixed_https_authority_and_all_tag_pages(self, connect):
+        first_page = [tag(f"v0.1.{number}", OLD) for number in range(100)]
+        last_page = [tag("v0.1.100", NEW)]
+        responses = []
+        for page in (first_page, last_page):
+            response = mock.Mock(status=200)
+            response.read.return_value = json.dumps(page).encode()
+            responses.append(response)
+        connection = connect.return_value
+        connection.getresponse.side_effect = responses
+        result = POLICY.api("repos/ThreatFlux/example/tags?per_page=100", pages=True)
+        self.assertEqual(result, first_page + last_page)
+        self.assertEqual(
+            connect.call_args_list, [mock.call("api.github.com", timeout=60)] * 2
+        )
+        paths = [call.args[1] for call in connection.request.call_args_list]
+        self.assertEqual(
+            paths,
+            [
+                "/repos/ThreatFlux/example/tags?per_page=100&page=1",
+                "/repos/ThreatFlux/example/tags?per_page=100&page=2",
+            ],
+        )
+        for call in connection.request.call_args_list:
+            self.assertEqual(call.args[0], "GET")
+            self.assertEqual(
+                call.kwargs["headers"]["Authorization"], "Bearer " + FAKE_TOKEN
+            )
+        self.assertEqual(connection.close.call_count, 2)
+
+    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": FAKE_TOKEN})
+    @mock.patch.object(POLICY.http.client, "HTTPSConnection")
+    def test_github_api_failure_refuses_alias_decision(self, connect):
+        response = mock.Mock(status=403)
+        connect.return_value.getresponse.return_value = response
+        with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+            POLICY.api("repos/ThreatFlux/example/commits/main")
+        response.read.assert_not_called()
+        connect.return_value.close.assert_called_once()
+
+    def test_virtual_workspace_uses_selected_binary_member_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            manifest = root / "Cargo.toml"
+            manifest.write_text('[workspace]\nmembers = ["app", "library"]\n')
+            for name, version in (("app", "1.2.3"), ("library", "9.0.0")):
+                member = root / name
+                member.mkdir()
+                (member / "Cargo.toml").write_text(
+                    f'[package]\nname = "{name}"\nversion = "{version}"\n'
+                )
+            version = POLICY.selected_version(
+                manifest, "app", root / "library/Cargo.toml"
+            )
+            self.assertEqual(version, "1.2.3")
+            POLICY.validate_release("refs/tags/v1.2.3", version)
+            with self.assertRaises(ValueError):
+                POLICY.validate_release("refs/tags/v9.0.0", version)
+            with self.assertRaises(ValueError):
+                POLICY.selected_version(manifest, "missing", manifest)
+
+    def test_selected_member_can_inherit_workspace_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            manifest = root / "Cargo.toml"
+            manifest.write_text(
+                '[workspace]\nmembers = ["app"]\n[workspace.package]\nversion = "1.2.3"\n'
+            )
+            member = root / "app"
+            member.mkdir()
+            (member / "Cargo.toml").write_text(
+                '[package]\nname = "app"\nversion.workspace = true\n'
+            )
+            self.assertEqual(
+                POLICY.selected_version(manifest, "app", manifest), "1.2.3"
+            )
+
+    @mock.patch.dict(POLICY.os.environ, {"GITHUB_REF": "refs/heads/main"})
+    @mock.patch.object(POLICY, "selected_version")
+    @mock.patch.object(sys, "argv", ["container_publish_policy.py", "--validate"])
+    def test_non_tag_build_does_not_require_a_root_package_version(self, version):
+        POLICY.main()
+        version.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
