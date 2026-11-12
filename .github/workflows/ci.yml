@@ -20,9 +20,9 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_STABLE_VERSION: 1.99.0
+  RUST_STABLE_VERSION: 1.99.1
   RUST_MSRV_VERSION: 1.97.1
-  RUSTUP_TOOLCHAIN: 1.99.0
+  RUSTUP_TOOLCHAIN: 1.99.1
 
 jobs:
   quick-check:
@@ -89,7 +89,7 @@ jobs:
         include:
           - os: linux
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
-            rust: "1.99.0"
+            rust: "1.99.1"
           - os: linux
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
             rust: beta
@@ -98,10 +98,10 @@ jobs:
             rust: nightly
           - os: macos
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_MACOS || 'macos-latest' }}
-            rust: "1.99.0"
+            rust: "1.99.1"
           - os: windows
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_WINDOWS || 'windows-latest' }}
-            rust: "1.99.0"
+            rust: "1.99.1"
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     continue-on-error: ${{ matrix.rust == 'nightly' }}
