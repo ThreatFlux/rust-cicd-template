@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import pathlib
+import secrets
 import unittest
 from unittest import mock
 
@@ -12,6 +13,7 @@ POLICY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(POLICY)
 OLD = "a" * 40
 NEW = "b" * 40
+FAKE_TOKEN = secrets.token_hex(16)
 
 
 def tag(name, sha):
@@ -90,7 +92,7 @@ class ContainerPublicationPolicy(unittest.TestCase):
         POLICY.require_main_ancestry(OLD, NEW, "ahead")
         POLICY.require_main_ancestry(NEW, NEW, "identical")
 
-    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": "test-only-token"})
+    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": FAKE_TOKEN})
     @mock.patch.object(POLICY.http.client, "HTTPSConnection")
     def test_github_api_uses_fixed_https_authority_and_all_tag_pages(self, connect):
         first_page = [tag(f"v0.1.{number}", OLD) for number in range(100)]
@@ -118,11 +120,11 @@ class ContainerPublicationPolicy(unittest.TestCase):
         for call in connection.request.call_args_list:
             self.assertEqual(call.args[0], "GET")
             self.assertEqual(
-                call.kwargs["headers"]["Authorization"], "Bearer test-only-token"
+                call.kwargs["headers"]["Authorization"], "Bearer " + FAKE_TOKEN
             )
         self.assertEqual(connection.close.call_count, 2)
 
-    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": "test-only-token"})
+    @mock.patch.dict(POLICY.os.environ, {"GH_TOKEN": FAKE_TOKEN})
     @mock.patch.object(POLICY.http.client, "HTTPSConnection")
     def test_github_api_failure_refuses_alias_decision(self, connect):
         response = mock.Mock(status=403)
