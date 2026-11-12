@@ -51,10 +51,10 @@ dev-setup: ## Install development tools
 	@echo "$(CYAN)Installing development tools...$(NC)"
 	@rustup component add rustfmt clippy llvm-tools-preview
 	@cargo install cargo-llvm-cov --version 0.9.1 --locked
-	@cargo install cargo-audit --version 0.22.2 --locked
+	@cargo install cargo-audit --version 0.23.0 --locked
 	@cargo install cargo-deny --version 0.20.2 --locked
-	@cargo install cargo-cyclonedx --version 0.5.9 --locked
-	@cargo install cargo-hack --version 0.6.45 --locked
+	@cargo install cargo-cyclonedx --version 0.5.10 --locked
+	@cargo install cargo-hack --version 0.6.46 --locked
 	@echo "$(GREEN)Development tools installed!$(NC)"
 	@echo "$(BLUE)Git hooks call make directly (make install-hooks); the pre-commit framework is optional for .pre-commit-config.yaml (e.g. pipx install pre-commit).$(NC)"
 
