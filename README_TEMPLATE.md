@@ -113,7 +113,7 @@ If this repository is primarily a CLI or service, replace this section with the 
 
 ### Prerequisites
 
-- Rust 1.97.1 or later (development is pinned to Rust 1.99.0)
+- Rust 1.97.1 or later (development is pinned to Rust 1.100.0)
 - Additional system dependencies if any
 
 ### Local Development Checks

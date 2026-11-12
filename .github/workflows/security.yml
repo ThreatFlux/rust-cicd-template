@@ -22,8 +22,8 @@ jobs:
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     env:
       CARGO_TERM_COLOR: always
-      RUST_VERSION: 1.99.1
-      RUSTUP_TOOLCHAIN: 1.99.1
+      RUST_VERSION: 1.100.0
+      RUSTUP_TOOLCHAIN: 1.100.0
       BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
       SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
 
@@ -68,8 +68,8 @@ jobs:
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     env:
       CARGO_TERM_COLOR: always
-      RUST_VERSION: 1.99.1
-      RUSTUP_TOOLCHAIN: 1.99.1
+      RUST_VERSION: 1.100.0
+      RUSTUP_TOOLCHAIN: 1.100.0
       BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
       SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
 
@@ -109,8 +109,8 @@ jobs:
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     env:
       CARGO_TERM_COLOR: always
-      RUST_VERSION: 1.99.1
-      RUSTUP_TOOLCHAIN: 1.99.1
+      RUST_VERSION: 1.100.0
+      RUSTUP_TOOLCHAIN: 1.100.0
       BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
       SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
 

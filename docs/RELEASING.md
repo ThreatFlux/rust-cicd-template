@@ -218,7 +218,7 @@ The `docker.yml` workflow also runs for the tag (on a maintainer or App push, di
 | Sign | Cosign keyless image signature on GHCR, and on Docker Hub when [Docker Hub publishing](#docker-hub-publishing) is on |
 | SBOM | SPDX image SBOM (workflow artifact) |
 | Push | `ghcr.io/threatflux/<image>` with semver tags (`1.2.3`, `1.2`, `1`) and the short SHA; the same image goes to `docker.io/<namespace>/<image>` only when [Docker Hub publishing](#docker-hub-publishing) is on |
-| Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.99.0` (`base-rust-latest` on `main` only) |
+| Base toolchain tags | `ghcr.io/threatflux/rust-cicd-template:base-rust-1.100.0` (`base-rust-latest` on `main` only) |
 
 ### crates.io Publishing
 
