@@ -22,8 +22,8 @@ jobs:
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     env:
       CARGO_TERM_COLOR: always
-      RUST_VERSION: 1.99.0
-      RUSTUP_TOOLCHAIN: 1.99.0
+      RUST_VERSION: 1.99.1
+      RUSTUP_TOOLCHAIN: 1.99.1
       BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
       SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
 
@@ -45,7 +45,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-audit@0.22.2
 
@@ -70,8 +70,8 @@ jobs:
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     env:
       CARGO_TERM_COLOR: always
-      RUST_VERSION: 1.99.0
-      RUSTUP_TOOLCHAIN: 1.99.0
+      RUST_VERSION: 1.99.1
+      RUSTUP_TOOLCHAIN: 1.99.1
       BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
       SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
 
@@ -93,7 +93,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-deny@0.20.2
 
@@ -111,8 +111,8 @@ jobs:
     runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
     env:
       CARGO_TERM_COLOR: always
-      RUST_VERSION: 1.99.0
-      RUSTUP_TOOLCHAIN: 1.99.0
+      RUST_VERSION: 1.99.1
+      RUSTUP_TOOLCHAIN: 1.99.1
       BINARY_NAME: ${{ vars.RUST_TEMPLATE_BINARY_NAME || 'rust-cicd-template' }}
       SBOM_MANIFEST_PATH: ${{ vars.RUST_TEMPLATE_SBOM_MANIFEST_PATH || 'Cargo.toml' }}
 
@@ -134,7 +134,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-cyclonedx@0.5.9
 
@@ -165,7 +165,7 @@ jobs:
       - name: TruffleHog Scan
         env:
           # Current stable image, with the same verified-only informational policy.
-          TRUFFLEHOG_IMAGE: trufflesecurity/trufflehog:3.98.0@sha256:0f32a1d73e552eaf528a4ac0800a26d32169d159bcd77303c833eb9dcdcb848b
+          TRUFFLEHOG_IMAGE: trufflesecurity/trufflehog:3.99.8@sha256:674b2f187620a19df77f44cf9a7d77efcc581a5662accef2f2739cbb46ba4a3a
         run: |
           set -euo pipefail
           # The raw report contains secret values; never leave it for the artifact upload.

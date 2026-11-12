@@ -20,9 +20,9 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_STABLE_VERSION: 1.99.0
+  RUST_STABLE_VERSION: 1.99.1
   RUST_MSRV_VERSION: 1.97.1
-  RUSTUP_TOOLCHAIN: 1.99.0
+  RUSTUP_TOOLCHAIN: 1.99.1
 
 jobs:
   quick-check:
@@ -87,9 +87,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Preserve existing protected check contexts as explicit compatibility
+          # lanes while the primary stable compiler advances to 1.99.1.
           - os: linux
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
             rust: "1.99.0"
+          - os: macos
+            runner: ${{ vars.RUST_TEMPLATE_RUNNER_MACOS || 'macos-latest' }}
+            rust: "1.99.0"
+          - os: windows
+            runner: ${{ vars.RUST_TEMPLATE_RUNNER_WINDOWS || 'windows-latest' }}
+            rust: "1.99.0"
+          - os: linux
+            runner: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+            rust: "1.99.1"
           - os: linux
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
             rust: beta
@@ -98,10 +109,10 @@ jobs:
             rust: nightly
           - os: macos
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_MACOS || 'macos-latest' }}
-            rust: "1.99.0"
+            rust: "1.99.1"
           - os: windows
             runner: ${{ vars.RUST_TEMPLATE_RUNNER_WINDOWS || 'windows-latest' }}
-            rust: "1.99.0"
+            rust: "1.99.1"
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     continue-on-error: ${{ matrix.rust == 'nightly' }}
@@ -212,7 +223,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-hack@0.6.45
 
@@ -311,7 +322,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-llvm-cov@0.9.1
 
