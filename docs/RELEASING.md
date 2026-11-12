@@ -314,8 +314,8 @@ promotes floating aliases only after the scan, signing and SBOM jobs succeed.
 It reads main and all stable tags again while holding that publication lock.
 `main` and `latest` continue to track current main; major and minor aliases select
 the newest stable version in their respective release lines. An older retry cannot
-replace a newer alias. Base-image aliases follow current main or the newest stable
-release; source-specific base tags remain available for historical builds.
+replace a newer alias. Base-image aliases follow current main; source-specific
+base tags remain available for historical builds.
 
 Tag builds must match the compiled Cargo version and belong to accepted main history.
 This policy applies to workflow versions containing these guards; historical tags

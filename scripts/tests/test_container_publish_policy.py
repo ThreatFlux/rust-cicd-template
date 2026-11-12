@@ -46,7 +46,7 @@ class ContainerPublicationPolicy(unittest.TestCase):
     def test_stable_tag_never_rewinds_main_tracking_aliases(self):
         self.assertEqual(
             POLICY.aliases("refs/tags/v0.5.4", OLD, NEW, [tag("v0.5.4", OLD)]),
-            {"runtime": ["0.5", "0"], "base": True},
+            {"runtime": ["0.5", "0"], "base": False},
         )
 
     def test_moved_or_mismatched_tag_cannot_promote(self):

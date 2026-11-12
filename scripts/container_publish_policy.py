@@ -29,7 +29,6 @@ def aliases(ref: str, source: str, main: str, tags: list[dict]) -> dict:
         match = STABLE.fullmatch(tag["name"])
         if match:
             stable.append((tuple(map(int, match.groups())), tag))
-    newest = max(stable, key=lambda item: item[0])[1] if stable else None
     candidate = (
         STABLE.fullmatch(ref.removeprefix("refs/tags/"))
         if ref.startswith("refs/tags/")
@@ -40,11 +39,6 @@ def aliases(ref: str, source: str, main: str, tags: list[dict]) -> dict:
         for _, tag in stable
     )
     current_main = source == main and (ref == "refs/heads/main" or matched_tag)
-    current_stable = (
-        newest is not None
-        and ref == "refs/tags/" + newest["name"]
-        and newest["commit"]["sha"] == source
-    )
     runtime = ["main", "latest"] if current_main else []
     if matched_tag:
         version = tuple(map(int, candidate.groups()))
@@ -54,7 +48,7 @@ def aliases(ref: str, source: str, main: str, tags: list[dict]) -> dict:
             runtime.append(f"{version[0]}.{version[1]}")
         if version == max(major_line):
             runtime.append(str(version[0]))
-    return {"runtime": runtime, "base": bool(current_main or current_stable)}
+    return {"runtime": runtime, "base": bool(current_main)}
 
 
 def api(path: str, *, pages: bool = False):
