@@ -17,15 +17,13 @@
 # Dependabot refreshes the first FROM (the Rust builder); maintainers refresh
 # the later runtime digest with the command above during template updates.
 
-FROM rust:1.99.1-trixie@sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d871684bc9c5433ae07 AS rust-base
+FROM rust:1.100.0-trixie@sha256:e19840879045c951c905d0eaa9887f3439c62000e429963371b376bac8d38c31 AS rust-base
 
-# The 1.100.0 compiler is stable; its official Docker indexes are not published
-# yet. Use the verified digest only to bootstrap rustup, then replace the old
-# compiler before building or exporting this toolchain base image.
+# Install the repository's requested components before exporting the toolchain
+# image or switching to the unprivileged builder.
 RUN rustup toolchain install 1.100.0 --profile minimal --no-self-update \
       --component rustfmt --component clippy --component llvm-tools-preview && \
     rustup default 1.100.0 && \
-    rustup toolchain uninstall 1.99.1 && \
     test "$(rustc --version | cut -d ' ' -f 2)" = 1.100.0
 
 ARG VERSION=0.0.0
@@ -105,7 +103,7 @@ RUN mkdir -p /home/builder/out/bin /home/builder/out/doc \
     fi && \
     cp /build/sbom.cdx.json /home/builder/out/doc/sbom.cdx.json
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a969bc80b539a5016ad866c14d1949bc6d0ab AS runtime
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2 AS runtime
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
