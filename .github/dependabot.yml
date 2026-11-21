@@ -6,6 +6,7 @@ multi-ecosystem-groups:
       interval: cron
       cronjob: "0 6 * * *"
       timezone: UTC
+    open-pull-requests-limit: 1
     commit-message:
       prefix: "chore(deps)"
 
@@ -14,7 +15,6 @@ updates:
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: nightly-dependencies
-    open-pull-requests-limit: 10
     groups:
       cargo-security:
         applies-to: security-updates
@@ -24,7 +24,6 @@ updates:
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: nightly-dependencies
-    open-pull-requests-limit: 5
     groups:
       github-actions-security:
         applies-to: security-updates
@@ -38,4 +37,3 @@ updates:
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: nightly-dependencies
-    open-pull-requests-limit: 10
