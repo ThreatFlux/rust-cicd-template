@@ -1,35 +1,34 @@
 version: 2
-updates:
-  - package-ecosystem: cargo
-    directory: /
+
+multi-ecosystem-groups:
+  nightly-dependencies:
     schedule:
       interval: cron
       cronjob: "0 6 * * *"
       timezone: UTC
-    open-pull-requests-limit: 10
-    groups:
-      rust-minor-patch:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
     commit-message:
       prefix: "chore(deps)"
 
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    patterns: ["*"]
+    multi-ecosystem-group: nightly-dependencies
+    open-pull-requests-limit: 10
+    groups:
+      cargo-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: cron
-      cronjob: "0 6 * * *"
-      timezone: UTC
+    patterns: ["*"]
+    multi-ecosystem-group: nightly-dependencies
     open-pull-requests-limit: 5
     groups:
-      github-actions:
-        patterns:
-          - "*"
-    commit-message:
-      prefix: "chore(ci)"
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
   # Covers the first FROM in Dockerfile and Dockerfile.debian: their shared Rust
   # builder image. GitHub's Docker updater does not support later FROM lines, so
@@ -37,14 +36,6 @@ updates:
   # `docker buildx imagetools inspect` command documented in each Dockerfile.
   - package-ecosystem: docker
     directory: /
-    schedule:
-      interval: cron
-      cronjob: "0 6 * * *"
-      timezone: UTC
+    patterns: ["*"]
+    multi-ecosystem-group: nightly-dependencies
     open-pull-requests-limit: 10
-    groups:
-      docker-base-images:
-        patterns:
-          - "*"
-    commit-message:
-      prefix: "chore(docker)"
