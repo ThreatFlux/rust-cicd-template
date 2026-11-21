@@ -77,6 +77,9 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # How to handle yanked crates
 yanked = "warn"
 
+# Treat unmaintained transitive dependencies the same as direct dependencies.
+unmaintained = "all"
+
 # Ignore specific advisories (add with justification)
 ignore = [
     # Example: "RUSTSEC-2020-0001", # Reason for ignoring
