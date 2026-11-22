@@ -253,6 +253,12 @@ The minimum supported Rust version is declared in these files and must stay in s
 | OCI image labels | Neutral defaults; overridable via build args |
 | `Base image tags` | Published base image tags: `base-rust-<channel>` and `base-rust-latest` |
 
+### Dependency Updates
+
+Dependabot checks Cargo, GitHub Actions, and Docker together at 06:00 UTC each day
+and opens one pull request for available version updates. Security updates are
+grouped separately within Cargo and GitHub Actions.
+
 ### Container Images
 
 `Dockerfile` is the single source of truth for every ThreatFlux Rust repo that ships a
